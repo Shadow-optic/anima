@@ -1,0 +1,425 @@
+// ANIMA Database Schema
+// PostgreSQL via Supabase + Prisma 6
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// USERS & AUTH
+// ─────────────────────────────────────────────
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String?
+  avatarUrl       String?
+  tier            Tier      @default(FREE)
+  stripeCustomerId String?  @unique
+  stripeSubId     String?
+  onboardedAt     DateTime?
+  pets            Pet[]
+  vetProfile      VetProfile?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([email])
+  @@index([tier])
+}
+
+model VetProfile {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id])
+  practiceName    String
+  licenseNumber   String
+  licenseState    String
+  specialty       String?
+  sharedPets      VetShare[]
+  createdAt       DateTime  @default(now())
+}
+
+model VetShare {
+  id              String    @id @default(cuid())
+  petId           String
+  pet             Pet       @relation(fields: [petId], references: [id])
+  vetId           String
+  vet             VetProfile @relation(fields: [vetId], references: [id])
+  active          Boolean   @default(true)
+  sharedAt        DateTime  @default(now())
+  revokedAt       DateTime?
+
+  @@unique([petId, vetId])
+}
+
+// ─────────────────────────────────────────────
+// PET PROFILES
+// ─────────────────────────────────────────────
+
+model Pet {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  species         Species
+  breed           String
+  breedSecondary  String?
+  dateOfBirth     DateTime
+  sex             Sex
+  neutered        Boolean   @default(false)
+  weightKg        Float
+  bodyCondition   Int       @default(5) // 1-9 BCS scale
+  photoUrl        String?
+  microchipId     String?
+
+  // Relations
+  twin            DigitalTwin?
+  scores          LongevityScore[]
+  meals           Meal[]
+  biomarkerSets   BiomarkerSet[]
+  vetRecords      VetRecord[]
+  weightHistory   WeightLog[]
+  vetShares       VetShare[]
+  activityLogs    ActivityLog[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([species, breed])
+}
+
+model WeightLog {
+  id              String    @id @default(cuid())
+  petId           String
+  pet             Pet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+  weightKg        Float
+  bodyCondition   Int?
+  source          DataSource @default(MANUAL)
+  recordedAt      DateTime  @default(now())
+
+  @@index([petId, recordedAt])
+}
+
+// ─────────────────────────────────────────────
+// DIGITAL TWIN
+// ─────────────────────────────────────────────
+
+model DigitalTwin {
+  id              String    @id @default(cuid())
+  petId           String    @unique
+  pet             Pet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  // Genetic layer
+  geneticProfile  Json?     // { breed_risks: [...], dna_panel: {...} }
+
+  // Current computed state (denormalized for fast reads)
+  currentState    Json      // Latest snapshot of all layers
+  riskPredictions Json?     // [{ disease, probability, timeframe, confidence }]
+  recommendations Json?     // [{ type, priority, title, description, action }]
+  healthTrajectory Json?    // { trend: "improving"|"stable"|"declining", velocity }
+
+  lastComputed    DateTime  @default(now())
+  version         Int       @default(1)
+
+  @@index([petId])
+}
+
+// ─────────────────────────────────────────────
+// LONGEVITY SCORE
+// ─────────────────────────────────────────────
+
+model LongevityScore {
+  id              String    @id @default(cuid())
+  petId           String
+  pet             Pet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+  score           Int       // 0-999
+  factors         Json      // { genetic: 85, biomarker: 72, nutrition: 68, ... }
+  breakdown       Json?     // Detailed per-factor explanation
+  percentile      Float?    // Percentile within breed
+  algorithmVersion String   @default("v1.0")
+  computedAt      DateTime  @default(now())
+
+  @@index([petId, computedAt(sort: Desc)])
+  @@index([score])
+}
+
+// ─────────────────────────────────────────────
+// BIOMARKERS & BIOCARD
+// ─────────────────────────────────────────────
+
+model BiomarkerSet {
+  id              String    @id @default(cuid())
+  petId           String
+  pet             Pet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+  source          DataSource
+  sourceRef       String?   // BioCard lot#, lab accession#, etc.
+  readings        Biomarker[]
+  scanImageUrl    String?   // Raw scan photo
+  scanQuality     Float?    // 0-1 quality score
+  processedAt     DateTime?
+  recordedAt      DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+
+  @@index([petId, recordedAt(sort: Desc)])
+  @@index([source])
+}
+
+model Biomarker {
+  id              String          @id @default(cuid())
+  setId           String
+  set             BiomarkerSet    @relation(fields: [setId], references: [id], onDelete: Cascade)
+  name            String          // "BUN", "pH", "cortisol", "creatinine"
+  value           Float
+  unit            String          // "mg/dL", "pH", "μg/dL"
+  referenceMin    Float?
+  referenceMax    Float?
+  status          BiomarkerStatus @default(NORMAL)
+  confidence      Float?          // 0-1, BioCard measurement confidence
+  method          String?         // "colorimetric", "enzymatic", "immunoassay"
+
+  @@index([setId])
+  @@index([name])
+}
+
+model BioCardLot {
+  id              String    @id @default(cuid())
+  lotNumber       String    @unique  // "BC-2026-0142"
+  cardVersion     String    // "v1", "v2"
+  biomarkers      String[]  // ["BUN", "pH", "protein", "cortisol"]
+  reagentBatch    String
+  manufacturedAt  DateTime
+  expiresAt       DateTime
+  unitCount       Int
+  calibrationData Json      // Per-lot calibration curves
+  qcPassed        Boolean   @default(false)
+  qcNotes         String?
+
+  @@index([lotNumber])
+}
+
+// ─────────────────────────────────────────────
+// NUTRITION
+// ─────────────────────────────────────────────
+
+model Meal {
+  id              String    @id @default(cuid())
+  petId           String
+  pet             Pet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+  type            MealType
+  items           MealItem[]
+  totalCalories   Float?
+  totalNutrients  Json?     // Aggregated nutrients
+  photoUrl        String?
+  notes           String?
+  loggedAt        DateTime  @default(now())
+
+  @@index([petId, loggedAt(sort: Desc)])
+}
+
+model MealItem {
+  id              String    @id @default(cuid())
+  mealId          String
+  meal            Meal      @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  foodId          String?
+  food            Food?     @relation(fields: [foodId], references: [id])
+  name            String    // Display name (food name or custom)
+  amountGrams     Float
+  calories        Float?
+  nutrients       Json?     // Per-item nutrient breakdown
+}
+
+model Food {
+  id              String    @id @default(cuid())
+  brand           String
+  productName     String
+  type            FoodType
+  species         Species
+  aafcoStage      String?   // "all_life_stages", "adult", "puppy", "kitten"
+  caloriesPer100g Float
+  guaranteedAnalysis Json   // { crude_protein_min, crude_fat_min, ... }
+  nutrients       Json      // Full nutrient profile per 100g
+  ingredients     String[]
+  firstFiveIngredients String[]
+  imageUrl        String?
+  affiliateUrl    String?
+  priceUsd        Float?
+  verified        Boolean   @default(false)
+  upcCode         String?   @unique
+  mealItems       MealItem[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([brand])
+  @@index([species, type])
+  @@index([upcCode])
+}
+
+model NutritionPlan {
+  id              String    @id @default(cuid())
+  petId           String
+  dailyCalories   Int
+  dailyProteinG   Float
+  dailyFatG       Float
+  dailyFiberG     Float
+  meals           Json      // [{ type, foods: [{ foodId, amountG }], time }]
+  supplements     Json?     // [{ name, dose, reason }]
+  generatedBy     String    @default("engine_v1") // Algorithm version
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime? // Plans regenerate periodically
+
+  @@index([petId])
+}
+
+// ─────────────────────────────────────────────
+// VET RECORDS
+// ─────────────────────────────────────────────
+
+model VetRecord {
+  id              String    @id @default(cuid())
+  petId           String
+  pet             Pet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+  type            VetRecordType
+  title           String
+  description     String?
+  provider        String?   // Vet clinic name
+  date            DateTime
+  nextDue         DateTime? // For vaccinations, checkups
+  documents       String[]  // URLs to uploaded docs
+  createdAt       DateTime  @default(now())
+
+  @@index([petId, date(sort: Desc)])
+  @@index([type])
+}
+
+// ─────────────────────────────────────────────
+// ACTIVITY (WEARABLE INTEGRATION)
+// ─────────────────────────────────────────────
+
+model ActivityLog {
+  id              String    @id @default(cuid())
+  petId           String
+  pet             Pet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+  source          String    // "fitbark", "whistle", "fi", "manual"
+  date            DateTime  @db.Date
+  steps           Int?
+  activeMinutes   Int?
+  restMinutes     Int?
+  sleepMinutes    Int?
+  sleepQuality    Float?    // 0-1
+  caloriesBurned  Int?
+  distanceKm      Float?
+  rawData         Json?     // Full payload from wearable API
+
+  @@unique([petId, source, date])
+  @@index([petId, date(sort: Desc)])
+}
+
+// ─────────────────────────────────────────────
+// MARKETPLACE
+// ─────────────────────────────────────────────
+
+model MarketplaceProduct {
+  id              String    @id @default(cuid())
+  name            String
+  brand           String
+  category        ProductCategory
+  description     String
+  priceUsd        Float
+  imageUrl        String?
+  purchaseUrl     String
+  affiliateCode   String?
+  commissionRate  Float?    // 0-1
+  species         Species[]
+  tags            String[]
+  featured        Boolean   @default(false)
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  @@index([category])
+  @@index([featured])
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum Tier {
+  FREE
+  PREMIUM
+  PRO
+  VET
+}
+
+enum Species {
+  DOG
+  CAT
+}
+
+enum Sex {
+  MALE
+  FEMALE
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+  TREAT
+}
+
+enum FoodType {
+  KIBBLE
+  WET
+  RAW
+  FREEZE_DRIED
+  DEHYDRATED
+  HOMEMADE
+  SUPPLEMENT
+  TREAT
+}
+
+enum DataSource {
+  BIOCARD
+  VET_LAB
+  WEARABLE
+  MANUAL
+  DNA_PANEL
+}
+
+enum BiomarkerStatus {
+  NORMAL
+  LOW
+  HIGH
+  CRITICAL
+  INVALID
+}
+
+enum VetRecordType {
+  VACCINATION
+  CHECKUP
+  SURGERY
+  DENTAL
+  LAB_WORK
+  DIAGNOSIS
+  MEDICATION
+  ALLERGY
+  INJURY
+  OTHER
+}
+
+enum ProductCategory {
+  FOOD
+  SUPPLEMENT
+  TESTING_KIT
+  WEARABLE
+  GROOMING
+  ACCESSORY
+}
