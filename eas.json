@@ -1,0 +1,76 @@
+{
+  "cli": {
+    "version": ">= 7.0.0",
+    "promptToConfigurePushNotifications": true,
+    "requireCommit": false
+  },
+  "build": {
+    "development": {
+      "distribution": "internal",
+      "channel": "development",
+      "ios": {
+        "buildType": "simulator",
+        "enterpriseProvisioning": "adhoc"
+      },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "ios": {
+        "buildType": "archive"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "channel": "production",
+      "ios": {
+        "buildType": "archive",
+        "scheme": "ANIMA"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "$APPLE_ID",
+        "appleTeamId": "$APPLE_TEAM_ID",
+        "bundleIdentifier": "com.animapet.app",
+        "ascAppId": "$ASC_APP_ID"
+      },
+      "android": {
+        "serviceAccount": "$ANDROID_SERVICE_ACCOUNT_JSON",
+        "track": "internal",
+        "changes": {
+          "en-US": "ANIMA Pet Health Platform - Latest Release"
+        }
+      }
+    }
+  },
+  "plugins": [
+    [
+      "expo-build-properties",
+      {
+        "ios": {
+          "deploymentTarget": "14.0",
+          "useFrameworks": "static"
+        },
+        "android": {
+          "minSdkVersion": 24,
+          "compileSdkVersion": 34,
+          "targetSdkVersion": 34,
+          "kotlinVersion": "1.9.10"
+        }
+      }
+    ]
+  ]
+}

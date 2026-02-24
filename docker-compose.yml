@@ -1,0 +1,81 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: anima-postgres
+    environment:
+      POSTGRES_USER: anima
+      POSTGRES_PASSWORD: anima_dev_password
+      POSTGRES_DB: anima_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anima"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - anima-network
+    restart: unless-stopped
+
+  # Mock API Server
+  mock-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: anima-mock-api
+    command: npm run mock:api
+    ports:
+      - "4010:4010"
+    environment:
+      NODE_ENV: development
+      PORT: 4010
+    volumes:
+      - ./server:/app/server:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - anima-network
+    restart: unless-stopped
+
+  # Main App (Expo Web)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: anima-app
+    ports:
+      - "8081:8081"
+    environment:
+      NODE_ENV: development
+      EXPO_PUBLIC_USE_MOCK_DATA: "true"
+      EXPO_PUBLIC_API_URL: http://localhost:4010
+      EXPO_PUBLIC_SUPABASE_URL: ${EXPO_PUBLIC_SUPABASE_URL:-https://your-project.supabase.co}
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${EXPO_PUBLIC_SUPABASE_ANON_KEY:-your-anon-key}
+      DATABASE_URL: postgresql://anima:anima_dev_password@postgres:5432/anima_db
+    volumes:
+      - ./app:/app/app
+      - ./components:/app/components
+      - ./hooks:/app/hooks
+      - ./stores:/app/stores
+      - ./shared:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - anima-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  anima-network:
+    driver: bridge

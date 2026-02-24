@@ -1,0 +1,257 @@
+version: '3.9'
+
+services:
+  # Appwrite Core Service
+  appwrite:
+    image: appwrite/appwrite:latest
+    container_name: anima-appwrite
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      _APP_ENV: development
+      _APP_DOMAIN: localhost
+      _APP_DOMAIN_TARGET: localhost
+      _APP_OPENSSL_KEY_V1: your-secret-key-min-32-chars-long
+      _APP_AUTH_LIMIT: 120
+      _APP_CONSOLE_WHITELIST_IPS: ""
+      _APP_CONSOLE_WHITELIST_EMAILS: ""
+      _APP_LOGGING_LEVEL: error
+      _APP_USAGE_STATS: enabled
+      _APP_SMTP_HOST: ""
+      _APP_SMTP_PORT: 587
+      _APP_SMTP_SECURE: tls
+      _APP_SMTP_USERNAME: ""
+      _APP_SMTP_PASSWORD: ""
+      _APP_REDIS_HOST: redis
+      _APP_REDIS_PORT: 6379
+      _APP_DB_HOST: mariadb
+      _APP_DB_PORT: 3306
+      _APP_DB_USER: appwrite
+      _APP_DB_PASS: appwrite_password
+      _APP_DB_SCHEMA: appwrite
+      _APP_INFLUXDB_HOST: influxdb
+      _APP_INFLUXDB_PORT: 8086
+      _APP_STORAGE_LIMIT: 30000000
+      _APP_FUNCTIONS_TIMEOUT: 900
+      _APP_FUNCTIONS_BUILD_TIMEOUT: 900
+    volumes:
+      - appwrite_storage:/storage
+      - appwrite_uploads:/uploads
+      - appwrite_cache:/cache
+      - appwrite_config:/config
+      - appwrite_certificates:/etc/letsencrypt
+    depends_on:
+      - mariadb
+      - redis
+      - influxdb
+    networks:
+      - anima-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Appwrite Realtime Service
+  appwrite_realtime:
+    image: appwrite/realtime:latest
+    container_name: anima-appwrite-realtime
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      _APP_ENV: development
+      _APP_REDIS_HOST: redis
+      _APP_REDIS_PORT: 6379
+    depends_on:
+      - redis
+    networks:
+      - anima-network
+
+  # Appwrite Worker (tasks)
+  appwrite_worker_tasks:
+    image: appwrite/appwrite:latest
+    container_name: anima-appwrite-worker-tasks
+    restart: unless-stopped
+    entrypoint: worker-tasks
+    environment:
+      _APP_ENV: development
+      _APP_REDIS_HOST: redis
+      _APP_REDIS_PORT: 6379
+      _APP_DB_HOST: mariadb
+      _APP_DB_PORT: 3306
+      _APP_DB_USER: appwrite
+      _APP_DB_PASS: appwrite_password
+      _APP_DB_SCHEMA: appwrite
+      _APP_STORAGE_LIMIT: 30000000
+    volumes:
+      - appwrite_storage:/storage
+      - appwrite_uploads:/uploads
+      - appwrite_cache:/cache
+      - appwrite_config:/config
+    depends_on:
+      - mariadb
+      - redis
+    networks:
+      - anima-network
+
+  # Appwrite Worker (webhooks)
+  appwrite_worker_webhooks:
+    image: appwrite/appwrite:latest
+    container_name: anima-appwrite-worker-webhooks
+    restart: unless-stopped
+    entrypoint: worker-webhooks
+    environment:
+      _APP_ENV: development
+      _APP_REDIS_HOST: redis
+      _APP_REDIS_PORT: 6379
+    depends_on:
+      - redis
+    networks:
+      - anima-network
+
+  # MariaDB Database for Appwrite
+  mariadb:
+    image: mariadb:latest
+    container_name: anima-mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: appwrite_root
+      MYSQL_DATABASE: appwrite
+      MYSQL_USER: appwrite
+      MYSQL_PASSWORD: appwrite_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - appwrite_mariadb:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - anima-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: anima-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - appwrite_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - anima-network
+
+  # InfluxDB for Analytics
+  influxdb:
+    image: influxdb:2-alpine
+    container_name: anima-influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      INFLUXDB_DB: appwrite
+      INFLUXDB_ADMIN_USER: appwrite
+      INFLUXDB_ADMIN_PASSWORD: appwrite_password
+      INFLUXDB_HTTP_AUTH_ENABLED: "false"
+    volumes:
+      - appwrite_influxdb:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - anima-network
+
+  # Web Platform (Expo Web)
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.multiplatform
+      target: web-runtime
+    container_name: anima-web
+    ports:
+      - "8081:8081"
+    environment:
+      NODE_ENV: development
+      EXPO_PUBLIC_USE_MOCK_DATA: "false"
+      EXPO_PUBLIC_API_URL: http://localhost
+      EXPO_PUBLIC_APPWRITE_ENDPOINT: http://localhost/v1
+      EXPO_PUBLIC_APPWRITE_PROJECT_ID: anima_project
+      EXPO_PUBLIC_APPWRITE_API_KEY: ${EXPO_PUBLIC_APPWRITE_API_KEY:-}
+      DATABASE_URL: appwrite://localhost
+    volumes:
+      - ./app:/app/app
+      - ./components:/app/components
+      - ./hooks:/app/hooks
+      - ./stores:/app/stores
+      - ./shared:/app/shared
+      - ./theme.ts:/app/theme.ts
+      - ./assets:/app/assets
+    depends_on:
+      appwrite:
+        condition: service_healthy
+    networks:
+      - anima-network
+    restart: unless-stopped
+
+  # EAS Build Service for iOS/Android
+  eas-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile.multiplatform
+      target: eas-builder
+    container_name: anima-eas-builder
+    environment:
+      NODE_ENV: production
+      EXPO_TOKEN: ${EXPO_TOKEN:-}
+      EAS_BUILD_ID: ${EAS_BUILD_ID:-}
+      EXPO_PUBLIC_APPWRITE_ENDPOINT: http://localhost/v1
+      EXPO_PUBLIC_APPWRITE_PROJECT_ID: anima_project
+    volumes:
+      - ./:/app
+      - ~/.ssh:/home/builder/.ssh:ro
+      - ~/.eas:/home/builder/.eas:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - anima-network
+    profiles:
+      - build
+    restart: "no"
+
+volumes:
+  appwrite_storage:
+    driver: local
+  appwrite_uploads:
+    driver: local
+  appwrite_cache:
+    driver: local
+  appwrite_config:
+    driver: local
+  appwrite_certificates:
+    driver: local
+  appwrite_mariadb:
+    driver: local
+  appwrite_redis:
+    driver: local
+  appwrite_influxdb:
+    driver: local
+
+networks:
+  anima-network:
+    driver: bridge
