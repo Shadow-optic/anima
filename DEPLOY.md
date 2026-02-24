@@ -64,6 +64,29 @@ Then build:
 
 ---
 
+## GitHub to A0.dev Auto-Deploy
+
+The repository includes a deploy workflow at `.github/workflows/deploy.yml` that now:
+- Builds and pushes the production Docker image to GHCR on every push to `main`
+- Also runs on version tags like `v1.0.0`
+- Supports manual runs from the GitHub Actions UI
+
+To trigger A0.dev deployments automatically after each `main` push:
+
+1. In the GitHub repo, add a secret named `A0_DEPLOY_HOOK_URL`
+2. Set it to your A0.dev deploy webhook URL
+3. Push to `main`
+
+The workflow will POST this payload to your webhook:
+
+```json
+{"repository":"owner/repo","sha":"<commit-sha>"}
+```
+
+If `A0_DEPLOY_HOOK_URL` is not set, the workflow still builds and publishes the image.
+
+---
+
 ## Detailed Setup
 
 ### Prerequisites

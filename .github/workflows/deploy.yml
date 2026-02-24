@@ -2,8 +2,11 @@ name: Deploy
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -35,9 +38,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            type=ref,event=branch
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=sha
             type=raw,value=latest
 
       - name: Build and push production image
@@ -49,3 +54,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+      - name: Trigger A0.dev deployment webhook
+        if: github.ref == 'refs/heads/main' && secrets.A0_DEPLOY_HOOK_URL != ''
+        run: |
+          curl -fsSL -X POST "${{ secrets.A0_DEPLOY_HOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\":\"${{ github.repository }}\",\"sha\":\"${{ github.sha }}\"}"
