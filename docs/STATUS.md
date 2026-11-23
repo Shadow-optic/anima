@@ -1,60 +1,43 @@
-# ANIMA Implementation Status
+# Status
 
-**Last updated:** 2026-08-06 · engine `pure-v1.0`
+**Last updated:** 2026-11-23 · Score engine `anima-v2.0`
 
-## Built Runtime Surfaces
+## Done
 
-- Expo Router app for iOS, Android, and web.
-- Route groups:
-  - `app/(auth)/login.tsx`
-  - `app/(tabs)/index.tsx` — Dashboard Score hero + factor bars
-  - `app/(tabs)/nutrition.tsx` — Plan / log / search + quick-log meals
-  - `app/(tabs)/health.tsx`
-  - `app/(tabs)/scan.tsx`
-  - `app/(tabs)/marketplace.tsx`
-  - `app/(tabs)/profile.tsx`
-  - `app/onboarding/index.tsx` — Wizard + **client pure Score reveal** with factor snapshot
-  - `app/pet/[id].tsx`
-  - `app/portal.tsx`
+- One backend: Supabase (auth, Postgres, row level security). Appwrite and the Express/Prisma design are gone from the build.
+- The core loop works end to end on real persistence: onboarding → Score → choose or enter a food → log meals and care → Score moves.
+- Guest mode: the same loop with data in the browser, moved into the account at sign-up.
+- Food Score engine and a rate-any-label tool.
+- Shareable Score card: link, image, share sheet, public page.
+- Every factor cites its sources and states its limits in the app.
 
-## Core Engines
+## Verified
 
-| Module | Role |
-|--------|------|
-| `shared/score/pureScore.ts` | **NEW** Dependency-free Phase-1 Longevity Score. Client + offline. |
-| `server/mock-api.mjs` | pure-v1.0 embedded. Breed-aware scores, NRC calories, meal nudges. |
-| `longevityScorer.ts` | Full Prisma + Redis production engine (backend path). |
-| `nutritionEngine.ts` | Full nutrition targets + meal plan generator (backend path). |
+- `npm test`: 12 engine tests (ratings, Score behaviour, citations resolve, share-link validation).
+- `npm run typecheck` and `npm run build:web` pass.
+- Full browser walk-through of the built site in guest mode, desktop and phone widths, no console errors.
+- `supabase/migrations/0001_init.sql` applied to Postgres 16 with a stand-in `auth` schema: a second user and an anonymous visitor can neither read nor write another user's rows; deleting a user removes their data.
 
-### pure-v1.0 Factor Weights
+## Not verified
 
-| Factor | Weight |
-|--------|--------|
-| Genetic Baseline | 25% |
-| Body Condition | 20% |
-| Nutrition Quality | 20% |
-| Age & Health | 15% |
-| Preventive Care | 10% |
-| Activity Level | 10% |
+- The account path (`lib/repo/supabase.ts`, sign-up, guest-to-account move) has not been run against a live Supabase project. It typechecks and the schema it targets is tested, but it needs a pass with real project keys.
 
-Nutrition factor lifts with meal logging density (0 → 1 → 3 → 7 → 14+ meals in 7 days).
+## Known gaps
 
-## Sprint Complete (2026-08-06)
+| Gap | Why it matters |
+|---|---|
+| Catalog is sample data | Nothing real can be recommended or sold until real label data is licensed or collected. |
+| No checkout, cart, inventory or fulfilment | The Shop is a rated catalog only. |
+| Share links carry the card in the URL | Works on static hosting, but link previews show the site's generic image, and a card is the owner's snapshot, not verified by ANIMA. A server-rendered share page would fix both. |
+| 38 breeds | Others fall back to the mixed-breed profile. |
+| Weights are not fitted to outcomes | They are evidence-informed judgement. Calibrating them needs outcome data. |
+| Native apps | The code is Expo, so iOS and Android can follow, but local storage and auth session storage are browser-only today. |
+| No analytics | Nothing measures the funnel yet. |
+| Password reset | The email is sent, but there is no "set new password" screen for the return link. |
 
-1. ✅ Client pure scorer (`shared/score/pureScore.ts`)
-2. ✅ Dashboard surfaces live factor breakdown from Score payload
-3. ✅ Meal logging → Score invalidation (useLogMeal settles score query)
-4. ✅ Onboarding polish: age→DOB, instant pure Score, factor snapshot on reveal
+## Next
 
-## Runbook
-
-```bash
-npm install
-npm run mock:api      # Terminal 1 — pure-v1.0 on :4010
-npm run start:web     # Terminal 2
-```
-
-Flow to verify:
-1. Open onboarding → create a Labrador vs French Bulldog → Scores should differ.
-2. Dashboard shows factor bars + labels from the pure engine.
-3. Nutrition → Log This Meal → pull-to-refresh dashboard → Score moves.
+1. Run the account path against a Supabase project and fix what turns up.
+2. Real product data for 50–100 foods people already buy, so a visitor finds their own bag.
+3. Server-rendered share page with a per-pet preview image.
+4. Analytics on the onboarding and share funnel.

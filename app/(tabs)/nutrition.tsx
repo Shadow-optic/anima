@@ -1,382 +1,216 @@
 /**
- * ANIMA Nutrition Tab
- * 
- * Shows: Active meal plan, meal log, food search, nutrition targets.
- * This is where daily engagement happens — meal logging is the
- * primary user action that feeds the Digital Twin.
+ * Nutrition: calorie target, meal and treat logging, and the week's summary.
  */
 
-import {useCallback, useState} from "react";
-import {Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View,} from "react-native";
-import * as Haptics from "expo-haptics";
-import {theme} from "@/config/theme";
-import {usePetStore} from "@/stores";
-import {useFoodSearch, useGeneratePlan, useLogMeal, useMeals, useNutritionPlan,} from "@/hooks/useApi";
+import { useMemo, useState } from "react";
+import { StyleSheet, Text, View } from "react-native";
+import { useRouter } from "expo-router";
+import { theme } from "@/config/theme";
+import { Bar, Button, Card, Field, GradeBadge, LinkText, Loading, Notice, PageHeader, Screen, SectionTitle, Segmented, confirmAction } from "@/components/ui";
+import { foodTitle } from "@/components/food";
+import { useActivePet, useDeleteMeal, useFoods, useLogMeal, useMeals, usePetScore } from "@/hooks/useData";
+import { caloriesForGrams, dailyPortionGrams, rateFood } from "@/shared/food/rating";
+import { petContext } from "@/shared/score/longevity";
 
-export default function NutritionScreen() {
-  const { activePet, activePetId } = usePetStore();
-  const [activeView, setActiveView] = useState<"plan" | "log" | "search">("plan");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
+const c = theme.colors;
 
-  const { data: plan, refetch: refetchPlan } = useNutritionPlan(activePetId || "");
-  const { data: meals, refetch: refetchMeals } = useMeals(activePetId || "");
-  const { data: searchResults } = useFoodSearch(searchQuery, activePet?.species);
+export default function Nutrition() {
+  const router = useRouter();
+  const { pet } = useActivePet();
+  const { foods, byId } = useFoods();
+  const { data: meals } = useMeals(pet?.id);
+  const { diet } = usePetScore(pet);
   const logMeal = useLogMeal();
-  const generatePlan = useGeneratePlan();
+  const deleteMeal = useDeleteMeal();
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await Promise.all([refetchPlan(), refetchMeals()]);
-    setRefreshing(false);
-  }, []);
+  const [grams, setGrams] = useState("");
+  const [treatId, setTreatId] = useState<string | null>(null);
+  const [treatCount, setTreatCount] = useState("1");
+  const [message, setMessage] = useState<string | null>(null);
 
-  if (!activePet || !activePetId) {
-    return (
-      <View style={styles.emptyState}>
-        <Text style={styles.emptyText}>Add a pet to see nutrition plans</Text>
-      </View>
+  const mainFood = pet?.primaryFoodId ? byId.get(pet.primaryFoodId) : undefined;
+  const ctx = useMemo(() => (pet ? petContext(pet) : null), [pet]);
+  const treats = useMemo(
+    () => (pet ? foods.filter((f) => f.category !== "COMPLETE" && (f.species === pet.species || f.species === "BOTH")) : []),
+    [foods, pet]
+  );
+
+  if (!pet || !ctx) return null;
+  if (!meals || !diet) return <Loading />;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const todayKcal = meals.filter((m) => m.loggedAt.slice(0, 10) === today).reduce((sum, m) => sum + m.totalCalories, 0);
+  const target = diet.dailyCalorieTarget;
+  const portion = mainFood ? dailyPortionGrams(mainFood, target) : 0;
+  const defaultGrams = portion ? Math.round(portion / 2) : 0;
+  const gramsNum = grams ? parseFloat(grams) : defaultGrams;
+  const treat = treatId ? byId.get(treatId) : treats[0];
+  const count = Math.max(1, Math.min(50, parseInt(treatCount, 10) || 1));
+  const treatKcal = treat ? (treat.kcalPerTreat != null ? treat.kcalPerTreat * count : caloriesForGrams(treat, 10 * count)) : 0;
+
+  const logMain = () => {
+    if (!mainFood || !Number.isFinite(gramsNum) || gramsNum <= 0 || gramsNum > 5000) {
+      setMessage("Enter an amount in grams.");
+      return;
+    }
+    const calories = caloriesForGrams(mainFood, gramsNum);
+    logMeal.mutate(
+      { petId: pet.id, type: "MEAL", items: [{ foodId: mainFood.id, name: foodTitle(mainFood), amountGrams: gramsNum, calories }] },
+      { onSuccess: () => setMessage(`Logged ${gramsNum} g (${calories} kcal).`), onError: (e: any) => setMessage(e?.message ?? "Could not save.") }
     );
-  }
-
-  const handleQuickLog = (mealType: "BREAKFAST" | "DINNER" | "SNACK") => {
-    if (!plan?.meals) return;
-
-    const plannedMeal = plan.meals.find((m: any) => m.type === mealType);
-    if (!plannedMeal) return;
-
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-    logMeal.mutate({
-      petId: activePetId,
-      meal: {
-        type: mealType,
-        items: plannedMeal.foods.map((f: any) => ({
-          foodId: f.foodId,
-          name: `${f.brand} ${f.name}`,
-          amountGrams: f.amountGrams,
-          calories: f.calories,
-        })),
-      },
-    });
   };
 
+  const logTreat = () => {
+    if (!treat) return;
+    logMeal.mutate(
+      {
+        petId: pet.id,
+        type: "TREAT",
+        items: [{ foodId: treat.id, name: `${foodTitle(treat)} × ${count}`, amountGrams: treat.kcalPerTreat != null ? 0 : 10 * count, calories: Math.round(treatKcal) }],
+      },
+      { onSuccess: () => setMessage(`Logged ${count} treat${count === 1 ? "" : "s"} (${Math.round(treatKcal)} kcal).`), onError: (e: any) => setMessage(e?.message ?? "Could not save.") }
+    );
+  };
+
+  const ratio = target > 0 ? todayKcal / target : 0;
+  const treatAllowance = Math.round(target * 0.1);
+
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.textTertiary} />
-      }
-    >
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Nutrition</Text>
-        <Text style={styles.subtitle}>{activePet.name}'s daily plan</Text>
-      </View>
+    <Screen>
+      <PageHeader title="Nutrition" subtitle={`What ${pet.name} eats is 25% of the Longevity Score.`} />
 
-      {/* View switcher */}
-      <View style={styles.viewSwitcher}>
-        {(["plan", "log", "search"] as const).map((view) => (
-          <Pressable
-            key={view}
-            style={[styles.viewTab, activeView === view && styles.viewTabActive]}
-            onPress={() => setActiveView(view)}
-          >
-            <Text style={[styles.viewTabText, activeView === view && styles.viewTabTextActive]}>
-              {view === "plan" ? "Today's Plan" : view === "log" ? "Meal Log" : "Find Food"}
+      <Card>
+        <View style={s.targetRow}>
+          <View>
+            <Text style={s.big}>
+              {todayKcal} <Text style={s.bigOf}>/ {target} kcal</Text>
             </Text>
-          </Pressable>
-        ))}
+            <Text style={s.meta}>logged today against the daily target</Text>
+          </View>
+        </View>
+        <View style={{ marginTop: 12 }}>
+          <Bar value={Math.min(100, ratio * 100)} color={ratio > 1.1 ? c.warning : c.success} />
+        </View>
+        <Text style={s.meta}>
+          The target is a starting point from {pet.name}'s weight, life stage and body condition. Individual needs vary, so
+          adjust it against body condition. Treat allowance: {treatAllowance} kcal a day.
+        </Text>
+      </Card>
+
+      <SectionTitle>This week</SectionTitle>
+      <View style={s.stats}>
+        <Stat label="Days logged" value={`${diet.daysLoggedLast7}/7`} />
+        <Stat label="Diet quality" value={diet.foodScore != null ? `${diet.foodScore}/100` : "—"} />
+        <Stat label="Calories vs target" value={diet.calorieRatio != null ? `${Math.round(diet.calorieRatio * 100)}%` : "—"} />
+        <Stat label="From treats" value={diet.treatCalorieShare != null ? `${Math.round(diet.treatCalorieShare * 100)}%` : "—"} warn={(diet.treatCalorieShare ?? 0) > 0.1} />
       </View>
+      {diet.daysLoggedLast7 < 3 ? <Text style={s.hint}>Calories and treats are scored once three days are logged.</Text> : null}
 
-      {/* ── Meal Plan View ── */}
-      {activeView === "plan" && plan && (
-        <View>
-          {/* Calorie summary */}
-          <View style={styles.calorieCard}>
-            <View style={styles.calorieHeader}>
-              <Text style={styles.calorieTitle}>Daily Target</Text>
-              <Pressable
-                style={styles.regenerateButton}
-                onPress={() => {
-                  Alert.alert("Regenerate Plan?", "Create a new meal plan based on latest Twin data?", [
-                    { text: "Cancel", style: "cancel" },
-                    { text: "Regenerate", onPress: () => generatePlan.mutate(activePetId) },
-                  ]);
-                }}
-              >
-                <Text style={styles.regenerateText}>↻ New Plan</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.calorieNumber}>{plan.dailyCalories}</Text>
-            <Text style={styles.calorieUnit}>kcal/day</Text>
-
-            <View style={styles.macroRow}>
-              {[
-                { label: "Protein", value: `${Math.round((plan as any).dailyProteinG || 0)}g` },
-                { label: "Fat", value: `${Math.round((plan as any).dailyFatG || 0)}g` },
-                { label: "Fiber", value: `${Math.round((plan as any).dailyFiberG || 0)}g` },
-              ].map((macro) => (
-                <View key={macro.label} style={styles.macroItem}>
-                  <Text style={styles.macroValue}>{macro.value}</Text>
-                  <Text style={styles.macroLabel}>{macro.label}</Text>
-                </View>
-              ))}
+      <SectionTitle action="Change food" onAction={() => router.push("/(tabs)/shop")}>
+        Log a meal
+      </SectionTitle>
+      {mainFood ? (
+        <Card>
+          <View style={s.foodHead}>
+            <GradeBadge grade={rateFood(mainFood, ctx).fit?.grade ?? "C"} size={40} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.foodName}>{foodTitle(mainFood)}</Text>
+              <Text style={s.meta}>About {portion} g a day meets the target.</Text>
             </View>
           </View>
-
-          {/* Meal cards */}
-          {plan.meals?.map((meal: any, i: number) => (
-            <View key={i} style={styles.mealCard}>
-              <View style={styles.mealHeader}>
-                <View>
-                  <Text style={styles.mealType}>{meal.type}</Text>
-                  <Text style={styles.mealTime}>{meal.timing}</Text>
-                </View>
-                <Text style={styles.mealCalories}>{meal.totalCalories} kcal</Text>
-              </View>
-
-              {meal.foods?.map((food: any, j: number) => (
-                <View key={j} style={styles.foodItem}>
-                  <View style={styles.foodInfo}>
-                    <Text style={styles.foodName}>{food.brand}</Text>
-                    <Text style={styles.foodProduct}>{food.name}</Text>
-                  </View>
-                  <Text style={styles.foodAmount}>{food.amountGrams}g</Text>
-                </View>
-              ))}
-
-              {/* Quick log button */}
-              <Pressable
-                style={styles.quickLogButton}
-                onPress={() => handleQuickLog(meal.type)}
-              >
-                <Text style={styles.quickLogText}>
-                  {logMeal.isPending ? "Logging..." : "✓ Log This Meal"}
-                </Text>
-              </Pressable>
+          <View style={s.logRow}>
+            <View style={{ flex: 1 }}>
+              <Field label="Amount (grams)" value={grams} onChangeText={setGrams} placeholder={String(defaultGrams)} inputMode="decimal" />
             </View>
-          ))}
-
-          {/* Supplements */}
-          {plan.supplements && plan.supplements.length > 0 && (
-            <View style={styles.supplementSection}>
-              <Text style={styles.supplementTitle}>Daily Supplements</Text>
-              {plan.supplements.map((supp: any, i: number) => (
-                <View key={i} style={styles.supplementItem}>
-                  <View style={[styles.supplementDot, {
-                    backgroundColor: supp.priority === "essential"
-                      ? theme.colors.danger
-                      : supp.priority === "recommended"
-                      ? theme.colors.warning
-                      : theme.colors.info,
-                  }]} />
-                  <View style={styles.supplementInfo}>
-                    <Text style={styles.supplementName}>{supp.name}</Text>
-                    <Text style={styles.supplementDose}>{supp.dose} · {supp.frequency}</Text>
-                    <Text style={styles.supplementReason}>{supp.reason}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Plan notes */}
-          {plan.notes && plan.notes.length > 0 && (
-            <View style={styles.notesCard}>
-              <Text style={styles.notesTitle}>Notes</Text>
-              {plan.notes.map((note: string, i: number) => (
-                <Text key={i} style={styles.noteText}>• {note}</Text>
-              ))}
-            </View>
-          )}
-
-          {/* Hydration reminder */}
-          <View style={styles.hydrationCard}>
-            <Text style={styles.hydrationIcon}>💧</Text>
-            <View>
-              <Text style={styles.hydrationTitle}>Hydration Target</Text>
-              <Text style={styles.hydrationAmount}>{plan.hydrationTargetMl || Math.round(activePet.weightKg * 55)} mL/day</Text>
-            </View>
+            <Button title="Log meal" variant="accent" onPress={logMain} loading={logMeal.isPending} style={{ marginTop: 22 }} />
           </View>
-        </View>
-      )}
-
-      {/* ── Meal Log View ── */}
-      {activeView === "log" && (
-        <View>
-          {meals && meals.length > 0 ? (
-            meals.map((meal: any, i: number) => (
-              <View key={meal.id || i} style={styles.logItem}>
-                <View style={styles.logHeader}>
-                  <Text style={styles.logType}>{meal.type}</Text>
-                  <Text style={styles.logDate}>
-                    {new Date(meal.loggedAt).toLocaleDateString(undefined, {
-                      weekday: "short", month: "short", day: "numeric",
-                    })}
-                  </Text>
-                </View>
-                {meal.items?.map((item: any, j: number) => (
-                  <Text key={j} style={styles.logFood}>
-                    {item.name} — {item.amountGrams}g {item.calories ? `(${item.calories} kcal)` : ""}
-                  </Text>
-                ))}
-                <Text style={styles.logTotal}>
-                  Total: {meal.totalCalories || meal.items?.reduce((s: number, i: any) => s + (i.calories || 0), 0)} kcal
-                </Text>
-              </View>
-            ))
-          ) : (
-            <View style={styles.emptyLog}>
-              <Text style={styles.emptyLogText}>No meals logged yet. Start by logging today's meals!</Text>
-            </View>
-          )}
-        </View>
-      )}
-
-      {/* ── Food Search View ── */}
-      {activeView === "search" && (
-        <View>
-          <View style={styles.searchBar}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search foods, brands..."
-              placeholderTextColor={theme.colors.textTertiary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoCapitalize="none"
-              returnKeyType="search"
-            />
+        </Card>
+      ) : (
+        <Card>
+          <Text style={s.foodName}>Choose {pet.name}'s main food first</Text>
+          <Text style={s.meta}>Meals are logged against a rated food so the calories and quality are known.</Text>
+          <View style={s.actions}>
+            <Button small title="Choose a food" variant="accent" onPress={() => router.push("/(tabs)/shop")} />
+            <Button small title="Enter a label" variant="secondary" onPress={() => router.push("/food/new")} />
           </View>
-
-          {searchResults && searchResults.map((food: any, i: number) => (
-            <Pressable key={food.id || i} style={styles.searchResult}>
-              <View style={styles.searchResultInfo}>
-                <Text style={styles.searchResultBrand}>{food.brand}</Text>
-                <Text style={styles.searchResultName}>{food.productName}</Text>
-                <Text style={styles.searchResultMeta}>
-                  {food.caloriesPer100g} kcal/100g · {food.type}
-                </Text>
-              </View>
-              <Pressable style={styles.addFoodButton}>
-                <Text style={styles.addFoodText}>+</Text>
-              </Pressable>
-            </Pressable>
-          ))}
-
-          {searchQuery.length >= 2 && (!searchResults || searchResults.length === 0) && (
-            <Text style={styles.noResults}>No foods found for "{searchQuery}"</Text>
-          )}
-        </View>
+        </Card>
       )}
 
-      <View style={{ height: 32 }} />
-    </ScrollView>
+      <SectionTitle>Log a treat</SectionTitle>
+      {treats.length > 0 && treat ? (
+        <Card>
+          <Segmented value={treat.id} onChange={setTreatId} options={treats.map((t) => ({ value: t.id, label: foodTitle(t) }))} wrap />
+          <View style={s.logRow}>
+            <View style={{ flex: 1 }}>
+              <Field
+                label={treat.kcalPerTreat != null ? "How many" : "How many 10 g portions"}
+                value={treatCount}
+                onChangeText={setTreatCount}
+                inputMode="numeric"
+                hint={`${Math.round(treatKcal)} kcal`}
+              />
+            </View>
+            <Button title="Log treat" variant="secondary" onPress={logTreat} loading={logMeal.isPending} style={{ marginTop: 22 }} />
+          </View>
+        </Card>
+      ) : null}
+
+      {message ? (
+        <View accessibilityLiveRegion="polite" style={{ marginTop: 12 }}>
+          <Notice level="good">{message}</Notice>
+        </View>
+      ) : null}
+
+      <SectionTitle>Recent log</SectionTitle>
+      {meals.length === 0 ? (
+        <Text style={s.hint}>Nothing logged yet.</Text>
+      ) : (
+        meals.slice(0, 20).map((m) => (
+          <Card key={m.id} style={s.logItem}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.logName}>{m.items.map((i) => i.name).join(", ")}</Text>
+              <Text style={s.meta}>
+                {m.type === "TREAT" ? "Treat" : "Meal"} · {m.totalCalories} kcal ·{" "}
+                {new Date(m.loggedAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+              </Text>
+            </View>
+            <LinkText onPress={() => confirmAction("Remove this entry?", () => deleteMeal.mutate(m))}>Remove</LinkText>
+          </Card>
+        ))
+      )}
+
+      <Card style={{ marginTop: 28 }}>
+        <Text style={s.foodName}>Feeding something that is not listed?</Text>
+        <Text style={s.meta}>Type in the guaranteed analysis and ingredients from the bag and get a rating in a minute.</Text>
+        <Button small title="Rate a food by its label" variant="secondary" onPress={() => router.push("/food/new")} style={{ marginTop: 12, alignSelf: "flex-start" }} />
+      </Card>
+    </Screen>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  content: { paddingTop: 60, paddingHorizontal: 20 },
-  header: { marginBottom: 16 },
-  title: { fontSize: 24, fontWeight: "700", color: theme.colors.textPrimary },
-  subtitle: { fontSize: 13, color: theme.colors.textSecondary, marginTop: 2 },
+function Stat({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  return (
+    <View style={s.stat}>
+      <Text style={[s.statVal, warn && { color: c.warning }]}>{value}</Text>
+      <Text style={s.statLabel}>{label}</Text>
+    </View>
+  );
+}
 
-  viewSwitcher: { flexDirection: "row", gap: 4, marginBottom: 20 },
-  viewTab: {
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 10, backgroundColor: "transparent",
-  },
-  viewTabActive: { backgroundColor: "rgba(255,255,255,0.1)" },
-  viewTabText: { fontSize: 13, fontWeight: "500", color: theme.colors.textTertiary },
-  viewTabTextActive: { color: theme.colors.textPrimary },
-
-  calorieCard: {
-    backgroundColor: theme.colors.surface, borderRadius: theme.radius.lg,
-    borderWidth: 1, borderColor: theme.colors.surfaceBorder,
-    padding: 20, alignItems: "center", marginBottom: 16,
-  },
-  calorieHeader: { flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 8 },
-  calorieTitle: { fontSize: 13, color: theme.colors.textSecondary },
-  calorieNumber: { fontSize: 48, fontWeight: "700", color: theme.colors.nutrition },
-  calorieUnit: { fontSize: 12, color: theme.colors.textTertiary, marginTop: 2 },
-  macroRow: { flexDirection: "row", gap: 24, marginTop: 16 },
-  macroItem: { alignItems: "center" },
-  macroValue: { fontSize: 18, fontWeight: "700", color: theme.colors.textPrimary },
-  macroLabel: { fontSize: 10, color: theme.colors.textTertiary, marginTop: 2, textTransform: "uppercase", letterSpacing: 0.5 },
-
-  regenerateButton: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.06)" },
-  regenerateText: { fontSize: 11, color: theme.colors.textSecondary, fontWeight: "500" },
-
-  mealCard: {
-    backgroundColor: theme.colors.surface, borderRadius: theme.radius.md,
-    borderWidth: 1, borderColor: theme.colors.surfaceBorder,
-    padding: 16, marginBottom: 10,
-  },
-  mealHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
-  mealType: { fontSize: 14, fontWeight: "600", color: theme.colors.textPrimary, textTransform: "uppercase", letterSpacing: 0.5 },
-  mealTime: { fontSize: 11, color: theme.colors.textTertiary, marginTop: 2 },
-  mealCalories: { fontSize: 15, fontWeight: "600", color: theme.colors.nutrition },
-
-  foodItem: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6, borderTopWidth: 1, borderTopColor: theme.colors.surfaceBorder },
-  foodInfo: { flex: 1 },
-  foodName: { fontSize: 12, fontWeight: "600", color: theme.colors.textPrimary },
-  foodProduct: { fontSize: 11, color: theme.colors.textTertiary, marginTop: 1 },
-  foodAmount: { fontSize: 13, fontWeight: "600", color: theme.colors.textSecondary },
-
-  quickLogButton: { marginTop: 12, paddingVertical: 10, borderRadius: 10, backgroundColor: `${theme.colors.nutrition}15`, alignItems: "center" },
-  quickLogText: { fontSize: 13, fontWeight: "600", color: theme.colors.nutrition },
-
-  supplementSection: { marginTop: 16, marginBottom: 16 },
-  supplementTitle: { fontSize: 14, fontWeight: "600", color: theme.colors.textPrimary, marginBottom: 10 },
-  supplementItem: { flexDirection: "row", gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: theme.colors.surfaceBorder },
-  supplementDot: { width: 6, height: 6, borderRadius: 3, marginTop: 6 },
-  supplementInfo: { flex: 1 },
-  supplementName: { fontSize: 13, fontWeight: "600", color: theme.colors.textPrimary },
-  supplementDose: { fontSize: 11, color: theme.colors.textSecondary, marginTop: 2 },
-  supplementReason: { fontSize: 11, color: theme.colors.textTertiary, marginTop: 2, fontStyle: "italic" },
-
-  notesCard: { backgroundColor: theme.colors.surface, borderRadius: theme.radius.md, padding: 16, marginBottom: 12 },
-  notesTitle: { fontSize: 13, fontWeight: "600", color: theme.colors.textPrimary, marginBottom: 8 },
-  noteText: { fontSize: 12, color: theme.colors.textSecondary, lineHeight: 18, marginBottom: 4 },
-
-  hydrationCard: {
-    flexDirection: "row", alignItems: "center", gap: 12,
-    backgroundColor: `${theme.colors.info}10`, borderRadius: theme.radius.md,
-    padding: 16, marginBottom: 16,
-  },
-  hydrationIcon: { fontSize: 28 },
-  hydrationTitle: { fontSize: 13, fontWeight: "600", color: theme.colors.textPrimary },
-  hydrationAmount: { fontSize: 11, color: theme.colors.info, marginTop: 2 },
-
-  // Log view
-  logItem: { backgroundColor: theme.colors.surface, borderRadius: theme.radius.md, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: theme.colors.surfaceBorder },
-  logHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
-  logType: { fontSize: 12, fontWeight: "600", color: theme.colors.nutrition, textTransform: "uppercase", letterSpacing: 0.5 },
-  logDate: { fontSize: 11, color: theme.colors.textTertiary },
-  logFood: { fontSize: 12, color: theme.colors.textSecondary, paddingVertical: 2 },
-  logTotal: { fontSize: 12, fontWeight: "600", color: theme.colors.textPrimary, marginTop: 6, borderTopWidth: 1, borderTopColor: theme.colors.surfaceBorder, paddingTop: 6 },
-  emptyLog: { padding: 40, alignItems: "center" },
-  emptyLogText: { fontSize: 13, color: theme.colors.textTertiary, textAlign: "center" },
-
-  // Search view
-  searchBar: { marginBottom: 16 },
-  searchInput: {
-    backgroundColor: theme.colors.surface, borderRadius: theme.radius.md,
-    borderWidth: 1, borderColor: theme.colors.surfaceBorder,
-    padding: 14, fontSize: 14, color: theme.colors.textPrimary,
-  },
-  searchResult: { flexDirection: "row", alignItems: "center", padding: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.surfaceBorder },
-  searchResultInfo: { flex: 1 },
-  searchResultBrand: { fontSize: 11, fontWeight: "600", color: theme.colors.textTertiary, textTransform: "uppercase", letterSpacing: 0.3 },
-  searchResultName: { fontSize: 14, fontWeight: "500", color: theme.colors.textPrimary, marginTop: 2 },
-  searchResultMeta: { fontSize: 11, color: theme.colors.textTertiary, marginTop: 2 },
-  addFoodButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.colors.surfaceHover, alignItems: "center", justifyContent: "center" },
-  addFoodText: { fontSize: 18, color: theme.colors.textPrimary, fontWeight: "500" },
-  noResults: { padding: 20, textAlign: "center", fontSize: 13, color: theme.colors.textTertiary },
-
-  emptyState: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: theme.colors.background },
-  emptyText: { fontSize: 14, color: theme.colors.textTertiary },
+const s = StyleSheet.create({
+  targetRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" },
+  big: { fontSize: 34, fontWeight: "800", color: c.textPrimary, fontVariant: ["tabular-nums"] },
+  bigOf: { fontSize: 17, fontWeight: "600", color: c.textSecondary },
+  meta: { fontSize: 13, lineHeight: 19, color: c.textSecondary, marginTop: 6 },
+  hint: { fontSize: 13, color: c.textTertiary, marginTop: 8 },
+  stats: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  stat: { flexGrow: 1, flexBasis: 140, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: c.surfaceBorder, backgroundColor: c.surface },
+  statVal: { fontSize: 22, fontWeight: "800", color: c.textPrimary },
+  statLabel: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
+  foodHead: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 },
+  foodName: { fontSize: 16, fontWeight: "700", color: c.textPrimary },
+  logRow: { flexDirection: "row", gap: 12, alignItems: "flex-start", marginTop: 4 },
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 },
+  logItem: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 8, padding: 14 },
+  logName: { fontSize: 14, fontWeight: "600", color: c.textPrimary },
 });

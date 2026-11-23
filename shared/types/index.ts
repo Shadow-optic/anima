@@ -1,15 +1,16 @@
 /**
- * ANIMA Shared Types
- * Used across mobile app, API, and web portal
+ * ANIMA shared types.
+ *
+ * Everything in `shared/` is dependency-free TypeScript so the same code runs
+ * in the browser, in React Native, in tests and (later) in server functions.
  */
 
 // ─────────────────────────────────────────────
-// PET
+// Pet
 // ─────────────────────────────────────────────
 
 export type Species = "DOG" | "CAT";
 export type Sex = "MALE" | "FEMALE";
-export type Tier = "FREE" | "PREMIUM" | "PRO" | "VET";
 
 export interface Pet {
   id: string;
@@ -17,214 +18,97 @@ export interface Pet {
   name: string;
   species: Species;
   breed: string;
-  breedSecondary?: string;
-  dateOfBirth: string;       // ISO date
+  dateOfBirth: string; // ISO date
   sex: Sex;
   neutered: boolean;
   weightKg: number;
-  bodyCondition: number;     // 1-9 BCS
-  photoUrl?: string;
-  microchipId?: string;
+  bodyCondition: number; // 1–9 body condition score
+  /** Owner-reported average active minutes per day. null = not answered yet. */
+  activityMinutesPerDay: number | null;
+  /** The food this pet eats most days. References a catalog or custom food id. */
+  primaryFoodId: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface PetWithScore extends Pet {
-  currentScore?: LongevityScore;
-  twin?: DigitalTwinSummary;
+export type NewPet = Omit<Pet, "id" | "userId" | "createdAt" | "updatedAt">;
+
+// ─────────────────────────────────────────────
+// Food
+// ─────────────────────────────────────────────
+
+export type FoodFormat = "KIBBLE" | "WET" | "FRESH" | "FREEZE_DRIED" | "RAW" | "TREAT" | "TOPPER";
+export type FoodCategory = "COMPLETE" | "TREAT" | "TOPPER";
+
+/** What the nutritional adequacy statement on the label says. */
+export type AdequacyBasis = "FEEDING_TRIAL" | "FORMULATED" | "NONE" | "UNKNOWN";
+export type AdequacyLifeStage = "GROWTH" | "MAINTENANCE" | "ALL_LIFE_STAGES" | "SUPPLEMENTAL" | "UNKNOWN";
+
+/** Guaranteed analysis exactly as printed on the label ("as fed"). */
+export interface GuaranteedAnalysis {
+  proteinMinPct: number;
+  fatMinPct: number;
+  fiberMaxPct: number;
+  moistureMaxPct: number;
+  ashPct?: number;
+  calciumPct?: number;
+  phosphorusPct?: number;
+  /** EPA + DHA, or total omega-3 when that is all the label gives. */
+  omega3Pct?: number;
+  taurinePct?: number;
 }
 
-// ─────────────────────────────────────────────
-// LONGEVITY SCORE
-// ─────────────────────────────────────────────
+/** Answers to the WSAVA "selecting a pet food" questions. undefined = unknown. */
+export interface MakerTransparency {
+  employsNutritionist?: boolean;
+  ownsManufacturing?: boolean;
+  publishesFullNutrientAnalysis?: boolean;
+  conductsFeedingTrialsOrResearch?: boolean;
+}
 
-export interface LongevityScore {
+export interface FoodProduct {
   id: string;
-  petId: string;
-  score: number;             // 0-999
-  factors: ScoreFactors;
-  breakdown: ScoreBreakdown[];
-  percentile: number | null;
-  label: ScoreLabel;
-  algorithmVersion: string;
-  computedAt: string;
-}
-
-export interface ScoreFactors {
-  genetic: number;
-  bodyCondition: number;
-  nutritionQuality: number;
-  ageHealth: number;
-  preventiveCare: number;
-  activityLevel: number;
-  biomarkerHealth?: number;
-  trajectory?: number;
-}
-
-export interface ScoreBreakdown {
-  factor: string;
-  score: number;            // 0-100
-  weight: number;           // 0-1
-  contribution: number;
-  label: string;
-  detail: string;
-  improvable: boolean;
-  suggestion?: string;
-}
-
-export type ScoreLabel =
-  | "Exceptional"  // 900-999
-  | "Excellent"    // 750-899
-  | "Good"         // 600-749
-  | "Fair"         // 400-599
-  | "At Risk"      // 200-399
-  | "Critical";    // 0-199
-
-export const SCORE_COLORS: Record<ScoreLabel, string> = {
-  Exceptional: "#10B981",   // Emerald
-  Excellent: "#34D399",     // Light green
-  Good: "#60A5FA",          // Blue
-  Fair: "#FBBF24",          // Amber
-  "At Risk": "#F97316",     // Orange
-  Critical: "#EF4444",      // Red
-};
-
-export function getScoreLabel(score: number): ScoreLabel {
-  if (score >= 900) return "Exceptional";
-  if (score >= 750) return "Excellent";
-  if (score >= 600) return "Good";
-  if (score >= 400) return "Fair";
-  if (score >= 200) return "At Risk";
-  return "Critical";
-}
-
-export function getScoreColor(score: number): string {
-  return SCORE_COLORS[getScoreLabel(score)];
-}
-
-// ─────────────────────────────────────────────
-// DIGITAL TWIN
-// ─────────────────────────────────────────────
-
-export interface DigitalTwinSummary {
-  id: string;
-  petId: string;
-  healthTrajectory: "improving" | "stable" | "declining" | "unknown";
-  riskPredictions: RiskPrediction[];
-  recommendations: Recommendation[];
-  lastComputed: string;
-  dataCompleteness: number;  // 0-100: how much data we have vs. could have
-}
-
-export interface RiskPrediction {
-  disease: string;
-  probability: number;     // 0-1
-  timeframeMonths: number;
-  confidence: number;      // 0-1
-  preventable: boolean;
-  source: "genetic" | "biomarker" | "population" | "trend";
-}
-
-export interface Recommendation {
-  id: string;
-  type: "nutrition" | "activity" | "vet_visit" | "testing" | "supplement";
-  priority: "high" | "medium" | "low";
-  title: string;
-  description: string;
-  action: string;           // Deep link or action identifier
-  impact: string;           // "Could improve score by ~15 points"
-}
-
-// ─────────────────────────────────────────────
-// BIOMARKERS
-// ─────────────────────────────────────────────
-
-export type DataSource = "BIOCARD" | "VET_LAB" | "WEARABLE" | "MANUAL" | "DNA_PANEL";
-export type BiomarkerStatus = "NORMAL" | "LOW" | "HIGH" | "CRITICAL" | "INVALID";
-
-export interface BiomarkerSet {
-  id: string;
-  petId: string;
-  source: DataSource;
-  sourceRef?: string;
-  readings: BiomarkerReading[];
-  scanQuality?: number;
-  recordedAt: string;
-}
-
-export interface BiomarkerReading {
-  id: string;
-  name: string;
-  value: number;
-  unit: string;
-  referenceMin?: number;
-  referenceMax?: number;
-  status: BiomarkerStatus;
-  confidence?: number;
-}
-
-export interface BiomarkerTrend {
-  name: string;
-  unit: string;
-  dataPoints: Array<{
-    value: number;
-    date: string;
-    source: DataSource;
-  }>;
-  trend: "rising" | "falling" | "stable";
-  velocity: number;        // Rate of change per month
-}
-
-export const BIOMARKER_STATUS_COLORS: Record<BiomarkerStatus, string> = {
-  NORMAL: "#10B981",
-  LOW: "#F97316",
-  HIGH: "#F97316",
-  CRITICAL: "#EF4444",
-  INVALID: "#6B7280",
-};
-
-// ─────────────────────────────────────────────
-// NUTRITION
-// ─────────────────────────────────────────────
-
-export type MealType = "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK" | "TREAT";
-export type FoodType = "KIBBLE" | "WET" | "RAW" | "FREEZE_DRIED" | "DEHYDRATED" | "HOMEMADE" | "SUPPLEMENT" | "TREAT";
-
-export interface NutritionPlan {
-  petId: string;
-  dailyCalories: number;
-  meals: PlannedMeal[];
-  supplements: Supplement[];
-  hydrationTargetMl: number;
-  notes: string[];
-  generatedAt: string;
-  validUntil: string;
-}
-
-export interface PlannedMeal {
-  type: MealType;
-  foods: PlannedFood[];
-  totalCalories: number;
-  timing: string;
-}
-
-export interface PlannedFood {
-  foodId: string;
-  name: string;
   brand: string;
+  name: string;
+  species: Species | "BOTH";
+  category: FoodCategory;
+  format: FoodFormat;
+  adequacyBasis: AdequacyBasis;
+  adequacyLifeStage: AdequacyLifeStage;
+  /** Label says it is suitable for growth of large-size dogs (70 lb+ as adults). */
+  largeBreedGrowthOk?: boolean;
+  ga: GuaranteedAnalysis;
+  /** Metabolisable energy from the label. Estimated from the analysis when absent. */
+  kcalPerKg?: number;
+  /** Ingredient list in label order. */
+  ingredients: string[];
+  grainFree?: boolean;
+  maker?: MakerTransparency;
+  /** Recalls of this brand in the last five years, when known. */
+  recallsLast5y?: number;
+  priceUsd?: number;
+  packageSizeKg?: number;
+  /** For treats: kcal in one piece. */
+  kcalPerTreat?: number;
+  tags?: string[];
+  /** Illustrative catalog entry, not a real product. */
+  isSample?: boolean;
+  /** Entered by a user from a label. */
+  ownerId?: string;
+  createdAt?: string;
+}
+
+// ─────────────────────────────────────────────
+// Logs
+// ─────────────────────────────────────────────
+
+export type MealType = "MEAL" | "TREAT";
+
+export interface MealLogItem {
+  foodId: string | null;
+  name: string;
   amountGrams: number;
   calories: number;
-  imageUrl?: string;
-  affiliateUrl?: string;
-  type: FoodType;
-}
-
-export interface Supplement {
-  name: string;
-  dose: string;
-  frequency: string;
-  reason: string;
-  priority: "essential" | "recommended" | "optional";
 }
 
 export interface MealLog {
@@ -233,59 +117,79 @@ export interface MealLog {
   type: MealType;
   items: MealLogItem[];
   totalCalories: number;
-  photoUrl?: string;
   loggedAt: string;
 }
 
-export interface MealLogItem {
-  foodId?: string;
-  name: string;
-  amountGrams: number;
-  calories: number;
-}
+export type NewMealLog = Omit<MealLog, "id" | "totalCalories" | "loggedAt"> & { loggedAt?: string };
 
-// ─────────────────────────────────────────────
-// BIOCARD
-// ─────────────────────────────────────────────
+export type CareKind = "WELLNESS_EXAM" | "VACCINATION" | "DENTAL" | "PARASITE_PREVENTION";
 
-export interface BioCardScanRequest {
+export interface CareEvent {
+  id: string;
   petId: string;
-  imageBase64: string;
-  cardVersion?: string;
+  kind: CareKind;
+  date: string; // ISO date the care happened
+  note?: string;
+  createdAt: string;
 }
 
-export interface BioCardScanResult {
-  success: boolean;
-  cardVersion: string;
-  lotNumber: string;
-  readings: BiomarkerReading[];
-  scanQuality: number;
-  warnings: string[];
-}
+export type NewCareEvent = Omit<CareEvent, "id" | "createdAt">;
 
 // ─────────────────────────────────────────────
-// API RESPONSES
+// Score
 // ─────────────────────────────────────────────
 
-export interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: {
-    code: string;
-    message: string;
-  };
-  meta?: {
-    page?: number;
-    total?: number;
-    limit?: number;
-  };
+export type FactorKey =
+  | "genetic"
+  | "bodyCondition"
+  | "nutritionQuality"
+  | "ageHealth"
+  | "preventiveCare"
+  | "activityLevel";
+
+export type ScoreFactors = Record<FactorKey, number>; // each 0–1
+
+export interface ScoreBreakdown {
+  factor: FactorKey;
+  label: string;
+  score: number; // 0–100
+  weight: number; // 0–1
+  contribution: number;
+  detail: string;
+  /** Can the owner change this factor? */
+  improvable: boolean;
+  /** True when the factor is a neutral placeholder because data is missing. */
+  estimated: boolean;
+  suggestion?: string;
+  actionRoute?: string;
 }
 
-export interface PaginatedResponse<T> extends ApiResponse<T[]> {
-  meta: {
-    page: number;
-    total: number;
-    limit: number;
-    hasMore: boolean;
-  };
+export type ScoreLabel = "Exceptional" | "Excellent" | "Good" | "Fair" | "At Risk" | "Critical";
+
+export interface LongevityScore {
+  score: number; // 0–999
+  factors: ScoreFactors;
+  breakdown: ScoreBreakdown[];
+  label: ScoreLabel;
+  /** 0–1: share of the score that rests on real data rather than neutral defaults. */
+  dataCompleteness: number;
+  algorithmVersion: string;
+  computedAt: string;
+}
+
+export interface ScoreSnapshot {
+  petId: string;
+  day: string; // YYYY-MM-DD
+  score: number;
+  factors: ScoreFactors;
+  algorithmVersion: string;
+}
+
+export function getScoreLabel(score: number): ScoreLabel {
+  if (score >= 900) return "Exceptional";
+  if (score >= 750) return "Excellent";
+  if (score >= 600) return "Good";
+  if (score >= 400) return "Fair";
+  if (score >= 200) return "At Risk";
+  return "Critical";
 }

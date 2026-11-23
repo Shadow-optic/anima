@@ -12,15 +12,15 @@ export const theme = {
   colors: {
     // Core palette
     background: "#0A0A0F",
-    surface: "rgba(255,255,255,0.03)",
+    surface: "rgba(255,255,255,0.04)",
     surfaceHover: "rgba(255,255,255,0.06)",
-    surfaceBorder: "rgba(255,255,255,0.06)",
+    surfaceBorder: "rgba(255,255,255,0.10)",
     surfaceBorderHover: "rgba(255,255,255,0.12)",
 
     // Text hierarchy
     textPrimary: "#E8E6E3",
-    textSecondary: "#888888",
-    textTertiary: "#555555",
+    textSecondary: "#A8A6A3",
+    textTertiary: "#7C7A78",
     textInverse: "#0A0A0F",
 
     // Score colors (the emotional spectrum of pet health)
@@ -148,3 +148,21 @@ export function getScoreLabel(score: number): string {
 }
 
 export type Theme = typeof theme;
+
+// Food Score grade colours
+export function getGradeColor(grade: string): string {
+  switch (grade) {
+    case "A": return theme.colors.scoreExceptional;
+    case "B": return theme.colors.scoreExcellent;
+    case "C": return theme.colors.scoreFair;
+    case "D": return theme.colors.scoreAtRisk;
+    default: return theme.colors.scoreCritical;
+  }
+}
+
+/** Bar colour for a 0–100 value. */
+export function getBarColor(value: number): string {
+  if (value >= 70) return theme.colors.success;
+  if (value >= 45) return theme.colors.warning;
+  return theme.colors.danger;
+}

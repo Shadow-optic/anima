@@ -1,109 +1,55 @@
 /**
- * ANIMA Root Layout
- * 
- * Expo Router file-based routing.
- * Sets up: QueryClient, Auth listener, Splash screen, Tab navigator
+ * Root layout: query client and the auth listener.
+ *
+ * Nothing here forces a sign-in. A visitor can get a Score as a guest; an
+ * account only decides where the data is saved.
  */
 
-import {useEffect} from "react";
-import {StatusBar} from "react-native";
-import {Stack, useRouter, useSegments} from "expo-router";
-import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
-import * as SplashScreen from "expo-splash-screen";
-import {isMockMode, supabase} from "@/config/api";
-import {useAuthStore} from "@/stores";
-import {theme} from "@/config/theme";
+import { useEffect } from "react";
+import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { supabase } from "@/config/supabase";
+import { theme } from "@/config/theme";
+import { moveGuestDataToAccount } from "@/lib/repo";
+import { useAuthStore } from "@/stores";
 
-// Keep splash visible while loading
-void SplashScreen.preventAutoHideAsync();
-
-// React Query client
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 2,
-      staleTime: 5 * 60 * 1000,
-      gcTime: 30 * 60 * 1000,
-    },
-  },
+  defaultOptions: { queries: { retry: 1, staleTime: 60_000, refetchOnWindowFocus: false } },
 });
 
-/**
- * Auth guard: redirects to login if not authenticated,
- * or to main app if already authenticated.
- */
-function useProtectedRoute() {
-  const { isAuthenticated, isLoading } = useAuthStore();
-  const segments = useSegments();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (isLoading) return;
-
-    const inAuthGroup = segments[0] === "(auth)";
-
-    if (!isAuthenticated && !inAuthGroup) {
-      router.replace("/(auth)/login");
-    } else if (isAuthenticated && inAuthGroup) {
-      router.replace("/(tabs)");
-    }
-  }, [isAuthenticated, isLoading, segments]);
-}
-
 export default function RootLayout() {
-  const { setUser, clearUser, setLoading } = useAuthStore();
+  const setAccount = useAuthStore((s) => s.setAccount);
+  const setGuest = useAuthStore((s) => s.setGuest);
 
-  // Listen for auth state changes
   useEffect(() => {
-    if (isMockMode) {
-      setUser({
-        id: "demo-user",
-        email: "demo@anima.local",
-        name: "Demo User",
-        tier: "PRO",
-      });
-      setLoading(false);
-      SplashScreen.hideAsync();
+    if (!supabase) {
+      setGuest();
       return;
     }
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        // Fetch user profile from our API
-        setUser({
-          id: session.user.id,
-          email: session.user.email || "",
-          name: session.user.user_metadata?.name,
-          tier: "FREE", // Will be updated from API
-        });
-      } else {
-        clearUser();
-      }
-      setLoading(false);
-      await SplashScreen.hideAsync();
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Supabase calls must not run inside this callback, so defer them.
+      setTimeout(async () => {
+        if (!session?.user) {
+          setGuest();
+          return;
+        }
+        try {
+          await moveGuestDataToAccount();
+        } catch {
+          // Guest data stays in this browser and is retried at the next sign-in.
+        }
+        setAccount({ id: session.user.id, email: session.user.email ?? null });
+        queryClient.invalidateQueries();
+      }, 0);
     });
-
-    return () => subscription.unsubscribe();
-  }, [setUser, clearUser, setLoading]);
-
-  useProtectedRoute();
+    return () => data.subscription.unsubscribe();
+  }, [setAccount, setGuest]);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <StatusBar barStyle="light-content" backgroundColor={theme.colors.background} />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: theme.colors.background },
-          animation: "fade",
-        }}
-      >
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
-        <Stack.Screen name="pet/[id]" />
-        <Stack.Screen name="portal" />
-      </Stack>
+      <StatusBar style="light" />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background }, animation: "fade" }} />
     </QueryClientProvider>
   );
 }

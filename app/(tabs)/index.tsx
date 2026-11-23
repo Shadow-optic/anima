@@ -1,670 +1,173 @@
 /**
- * ANIMA Dashboard — The Home Screen
- * 
- * What the user sees every time they open the app.
- * The Score is the hero. Everything else serves the Score.
- * 
- * Layout:
- *   Score (big number, animated)
- *   Quick Insights Row (photo vitals, voice, env risk)
- *   Active Alerts (environmental, food, behavioral)
- *   Upcoming Care
- *   Recent Activity Feed
+ * Score dashboard: the number, what moves it, and where to act next.
  */
 
-import {useCallback, useEffect, useRef, useState} from "react";
-import {
-    Animated,
-    Dimensions,
-    Easing,
-    Pressable,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
-} from "react-native";
-import {useRouter} from "expo-router";
-import {LinearGradient} from "expo-linear-gradient";
-import * as Haptics from "expo-haptics";
-import {getScoreColor, getScoreLabel, theme} from "@/config/theme";
-import {usePetStore} from "@/stores";
-import {useBehavioralInsights, useCareTimeline, useEnvironmentRisks, usePets, useScore,} from "@/hooks/useApi";
+import { useState } from "react";
+import { StyleSheet, Text, View } from "react-native";
+import { useRouter } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
+import { isSupabaseConfigured } from "@/config/supabase";
+import { getScoreColor, theme } from "@/config/theme";
+import { Button, Card, GradeBadge, LinkText, Loading, Notice, PageHeader, ScoreNumber, Screen, SectionTitle } from "@/components/ui";
+import { foodTitle } from "@/components/food";
+import { FactorList, ScoreTrend } from "@/components/score";
+import { SharePanel } from "@/components/ShareCard";
+import { useActivePet, useFoodRating, useFoods, usePetScore, useRecordSnapshot, useSnapshots } from "@/hooks/useData";
+import { buildShareCard } from "@/lib/share";
+import { useAuthStore } from "@/stores";
+import { getBreed } from "@/shared/constants/breeds";
+import { ageYears } from "@/shared/nutrition/energy";
+import { SCORE_DISCLAIMER } from "@/shared/score/evidence";
+import { upsidePoints } from "@/shared/score/longevity";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const c = theme.colors;
 
-export default function DashboardScreen() {
+export default function Dashboard() {
   const router = useRouter();
-  const { activePet, activePetId, setActivePet } = usePetStore();
-  const [refreshing, setRefreshing] = useState(false);
+  const guest = useAuthStore((st) => st.status) !== "account";
+  const { pet } = useActivePet();
+  const { score, diet, isLoading } = usePetScore(pet);
+  const { byId } = useFoods();
+  const { data: snapshots } = useSnapshots(pet?.id);
+  useRecordSnapshot(pet, score);
+  const [sharing, setSharing] = useState(false);
 
-  // Data hooks
-  const { data: pets, refetch: refetchPets } = usePets();
-  const { data: score, refetch: refetchScore } = useScore(activePetId || "");
-  const { data: envRisks } = useEnvironmentRisks(activePetId || "");
-  const { data: careTimeline } = useCareTimeline(activePetId || "");
-  const { data: behavioral } = useBehavioralInsights(activePetId || "");
+  const food = pet?.primaryFoodId ? byId.get(pet.primaryFoodId) : undefined;
+  const rating = useFoodRating(food, pet);
 
-  // Set first pet as active if none selected
-  useEffect(() => {
-    if (!activePet && pets && pets.length > 0) {
-      const first = pets[0];
-      setActivePet(first, first.currentScore);
-    }
-  }, [pets, activePet]);
+  if (!pet) return null;
+  if (isLoading || !score) return <Loading />;
 
-  // Score animation
-  const scoreAnim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (score?.score) {
-      scoreAnim.setValue(0);
-      Animated.timing(scoreAnim, {
-        toValue: score.score,
-        duration: 1500,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
-      }).start();
-    }
-  }, [score?.score]);
-
-  const displayScore = scoreAnim.interpolate({
-    inputRange: [0, 999],
-    outputRange: [0, 999],
-  });
-
-  // Pull to refresh
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await Promise.all([refetchPets(), refetchScore()]);
-    setRefreshing(false);
-  }, []);
-
-  const scoreColor = score ? getScoreColor(score.score) : theme.colors.textTertiary;
-  const scoreLabel = score ? getScoreLabel(score.score) : "—";
-
-  if (!activePet) {
-    return (
-      <View style={styles.emptyState}>
-        <Text style={styles.emptyEmoji}>🐾</Text>
-        <Text style={styles.emptyTitle}>Welcome to ANIMA</Text>
-        <Text style={styles.emptySubtitle}>Add your first pet to get started</Text>
-        <Pressable
-          style={styles.primaryButton}
-          onPress={() => router.push("/onboarding")}
-        >
-          <Text style={styles.primaryButtonText}>Add Pet</Text>
-        </Pressable>
-      </View>
-    );
-  }
+  const color = getScoreColor(score.score);
+  const age = ageYears(pet.dateOfBirth);
+  const best = score.breakdown
+    .filter((b) => b.improvable && b.suggestion)
+    .sort((a, b) => upsidePoints(b) - upsidePoints(a))[0];
+  const breed = getBreed(pet.species, pet.breed);
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={theme.colors.textTertiary}
-        />
-      }
-    >
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.appLabel}>ANIMA</Text>
-          <Text style={styles.petName}>{activePet.name}</Text>
-        </View>
-        <View style={styles.headerRight}>
-          <Text style={styles.twinStatus}>Twin synced</Text>
-          <View style={styles.twinDot} />
-        </View>
-      </View>
+    <Screen>
+      <PageHeader
+        title={pet.name}
+        subtitle={`${pet.breed} · ${age < 1 ? `${Math.round(age * 12)} months` : `${age.toFixed(1)} years`} · ${pet.weightKg} kg`}
+      />
 
-      {/* ── Longevity Score Hero ── */}
-      <Pressable
-        style={styles.scoreCard}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          router.push(`/pet/${activePet.id}`);
-        }}
-      >
-        <LinearGradient
-          colors={[`${scoreColor}15`, "transparent"]}
-          style={StyleSheet.absoluteFill}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-        />
-
-        <Text style={styles.scoreLabel}>Longevity Score™</Text>
-
-        <AnimatedScoreDisplay value={score?.score || 0} color={scoreColor} />
-
-        <Text style={[styles.scoreLabelText, { color: scoreColor }]}>
-          {scoreLabel}
-        </Text>
-
-        {score && (
-          <Text style={styles.scoreSubtext}>
-            Top {score.percentile || "—"}% of {activePet.breed}s
+      <Card style={{ overflow: "hidden", alignItems: "center", paddingVertical: 28 }}>
+        <LinearGradient colors={[`${color}22`, "transparent"]} style={StyleSheet.absoluteFill} />
+        <Text style={s.kicker}>LONGEVITY SCORE</Text>
+        <ScoreNumber score={score.score} />
+        <Text style={s.outOf}>out of 999</Text>
+        {score.dataCompleteness < 1 ? (
+          <Text style={s.completeness}>
+            Based on {Math.round(score.dataCompleteness * 100)}% real data. Factors marked “No data yet” are neutral placeholders.
           </Text>
-        )}
+        ) : null}
+        <View style={s.heroActions}>
+          <Button small title={sharing ? "Hide share card" : "Share Score"} variant="secondary" onPress={() => setSharing(!sharing)} />
+          <Button small title="How it works" variant="ghost" onPress={() => router.push("/science")} />
+        </View>
+      </Card>
 
-        {/* Factor bars */}
-        {score?.breakdown && (
-          <View style={styles.factorGrid}>
-            {score.breakdown.slice(0, 6).map((factor: any) => (
-              <View key={factor.factor} style={styles.factorItem}>
-                <View style={styles.factorHeader}>
-                  <Text style={styles.factorName}>{factor.label}</Text>
-                  <Text style={styles.factorScore}>{factor.score}</Text>
-                </View>
-                <View style={styles.factorBar}>
-                  <View
-                    style={[
-                      styles.factorBarFill,
-                      {
-                        width: `${factor.score}%`,
-                        backgroundColor: factor.score >= 70
-                          ? theme.colors.success
-                          : factor.score >= 40
-                          ? theme.colors.warning
-                          : theme.colors.danger,
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-            ))}
+      {sharing ? (
+        <Card style={{ marginTop: 14 }}>
+          <SharePanel card={buildShareCard(pet, score, rating?.fit?.grade)} />
+        </Card>
+      ) : null}
+
+      {best ? (
+        <Card style={{ marginTop: 14, borderColor: `${c.success}55` }}>
+          <Text style={s.nextKicker}>BIGGEST OPPORTUNITY · {best.label.toUpperCase()}</Text>
+          <Text style={s.nextText}>{best.suggestion}</Text>
+          <View style={s.nextRow}>
+            <Text style={s.nextPoints}>Up to +{upsidePoints(best)} points</Text>
+            {best.actionRoute ? <Button small title="Do this" variant="accent" onPress={() => router.push(best.actionRoute as any)} /> : null}
           </View>
-        )}
-      </Pressable>
+        </Card>
+      ) : null}
 
-      {/* ── Quick Insights Row ── */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.insightsRow}
-      >
-        <InsightCard
-          icon="📸"
-          title="Photo Vitals"
-          value="7"
-          unit="analyzed this week"
-          color={theme.colors.photoVitals}
-          onPress={() => router.push(`/pet/${activePet.id}?tab=photoVitals`)}
-        />
-        <InsightCard
-          icon="🎤"
-          title="Voice Monitor"
-          value="18"
-          unit="breaths/min"
-          badge="Normal"
-          color={theme.colors.voice}
-          onPress={() => router.push(`/pet/${activePet.id}?tab=voice`)}
-        />
-        <InsightCard
-          icon="🌡️"
-          title="Environment"
-          value={envRisks?.overallRiskLevel || "low"}
-          unit="risk level"
-          color={theme.colors.environment}
-          onPress={() => router.push(`/pet/${activePet.id}?tab=environment`)}
-        />
-      </ScrollView>
-
-      {/* ── Active Alerts ── */}
-      {behavioral && behavioral.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Insights</Text>
-          {behavioral.slice(0, 2).map((insight: any, i: number) => (
-            <Pressable
-              key={i}
-              style={[styles.alertCard, {
-                borderColor: insight.healthRelevance === "high"
-                  ? `${theme.colors.warning}33`
-                  : theme.colors.surfaceBorder,
-              }]}
-            >
-              <View style={styles.alertBadge}>
-                <Text style={[styles.alertBadgeText, {
-                  color: insight.healthRelevance === "high"
-                    ? theme.colors.warning
-                    : theme.colors.info,
-                }]}>
-                  {insight.healthRelevance.toUpperCase()}
-                </Text>
-              </View>
-              <Text style={styles.alertTitle}>{insight.signal}</Text>
-              <Text style={styles.alertDetail}>{insight.recommendation}</Text>
-            </Pressable>
-          ))}
-        </View>
+      <SectionTitle action="All foods" onAction={() => router.push("/(tabs)/shop")}>
+        What {pet.name} eats
+      </SectionTitle>
+      {food && rating ? (
+        <Card onPress={() => router.push(`/food/${food.id}` as any)} style={s.foodCard} label={`${foodTitle(food)} rating`}>
+          <GradeBadge grade={rating.fit?.grade ?? rating.grade} score={rating.fit?.score ?? rating.score} size={56} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.foodName}>{foodTitle(food)}</Text>
+            <Text style={s.foodMeta}>
+              Food quality is {Math.round(55 * 0.25)}% of the whole Score.{" "}
+              {diet ? `Target ${diet.dailyCalorieTarget} kcal a day · ${diet.daysLoggedLast7}/7 days logged.` : ""}
+            </Text>
+          </View>
+        </Card>
+      ) : (
+        <Card>
+          <Text style={s.foodName}>No food on record</Text>
+          <Text style={s.foodMeta}>
+            Nutrition is a quarter of the Score and it is running on a placeholder. Pick {pet.name}'s food or type in its label.
+          </Text>
+          <View style={s.heroActions}>
+            <Button small title="Choose a food" variant="accent" onPress={() => router.push("/(tabs)/shop")} />
+            <Button small title="Enter a label" variant="secondary" onPress={() => router.push("/food/new")} />
+          </View>
+        </Card>
       )}
 
-      {/* ── Upcoming Care ── */}
-      {careTimeline && careTimeline.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Upcoming Care</Text>
-          {careTimeline.slice(0, 3).map((item: any, i: number) => (
-            <View key={i} style={styles.careItem}>
-              <View style={[styles.careDot, {
-                backgroundColor:
-                  item.priority === "overdue" ? theme.colors.danger :
-                  item.priority === "due_soon" ? theme.colors.warning :
-                  theme.colors.info,
-              }]} />
-              <View style={styles.careContent}>
-                <Text style={styles.careTitle}>{item.title}</Text>
-                <Text style={styles.careDetail}>{item.detail}</Text>
-              </View>
-              <View style={[styles.careBadge, {
-                backgroundColor:
-                  item.priority === "overdue" ? `${theme.colors.danger}20` :
-                  item.priority === "due_soon" ? `${theme.colors.warning}20` :
-                  `${theme.colors.info}20`,
-              }]}>
-                <Text style={[styles.careBadgeText, {
-                  color:
-                    item.priority === "overdue" ? theme.colors.danger :
-                    item.priority === "due_soon" ? theme.colors.warning :
-                    theme.colors.info,
-                }]}>
-                  {item.priority === "overdue"
-                    ? `${Math.abs(item.daysUntilDue)}d overdue`
-                    : `${item.daysUntilDue}d`}
-                </Text>
-              </View>
-            </View>
-          ))}
+      <SectionTitle>What drives the Score</SectionTitle>
+      <Card>
+        <Text style={s.foodMeta}>Open a factor for the calculation and the research behind it.</Text>
+        <View style={{ marginTop: 8 }}>
+          <FactorList breakdown={score.breakdown} />
         </View>
-      )}
+      </Card>
 
-      {/* ── Quick Actions ── */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.actionsGrid}>
-          {[
-            { icon: "🍖", label: "Log Meal", route: "/nutrition" },
-            { icon: "⚖️", label: "Weight", route: `/pet/${activePet.id}` },
-            { icon: "📷", label: "Photo Vitals", route: `/pet/${activePet.id}?tab=photoVitals` },
-            { icon: "⬡", label: "BioCard Scan", route: "/(tabs)/scan" },
-          ].map((action) => (
-            <Pressable
-              key={action.label}
-              style={styles.actionButton}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push(action.route as any);
-              }}
-            >
-              <Text style={styles.actionIcon}>{action.icon}</Text>
-              <Text style={styles.actionLabel}>{action.label}</Text>
-            </Pressable>
+      <SectionTitle>Trend</SectionTitle>
+      <Card>
+        <ScoreTrend snapshots={snapshots ?? []} />
+      </Card>
+
+      {breed.nutritionNotes.length > 0 ? (
+        <>
+          <SectionTitle>Worth knowing about {breed.name}s</SectionTitle>
+          {breed.nutritionNotes.map((n) => (
+            <Notice key={n} level="info">
+              {n}
+            </Notice>
           ))}
-        </View>
-      </View>
+        </>
+      ) : null}
 
-      {/* Bottom spacer */}
-      <View style={{ height: 32 }} />
-    </ScrollView>
+      {guest ? (
+        <Card style={{ marginTop: 24 }}>
+          <Text style={s.foodName}>Saved in this browser only</Text>
+          <Text style={s.foodMeta}>
+            {isSupabaseConfigured
+              ? `Create a free account to keep ${pet.name}'s profile and history, and to use it on another device.`
+              : `Clearing your browser data will remove ${pet.name}'s profile.`}
+          </Text>
+          {isSupabaseConfigured ? (
+            <Button small title="Create free account" onPress={() => router.push("/(auth)/login")} style={{ marginTop: 12, alignSelf: "flex-start" }} />
+          ) : null}
+        </Card>
+      ) : null}
+
+      <Text style={s.disclaimer}>
+        {SCORE_DISCLAIMER} <LinkText onPress={() => router.push("/science")} style={{ fontSize: 12 }}>Method and sources</LinkText>
+      </Text>
+    </Screen>
   );
 }
 
-// ─────────────────────────────────────────────
-// Sub-components
-// ─────────────────────────────────────────────
-
-function AnimatedScoreDisplay({ value, color }: { value: number; color: string }) {
-  const [display, setDisplay] = useState(0);
-
-  useEffect(() => {
-    const target = value;
-    const duration = 1500;
-    const start = Date.now();
-    const startVal = display;
-
-    const animate = () => {
-      const elapsed = Date.now() - start;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(startVal + (target - startVal) * eased));
-      if (progress < 1) requestAnimationFrame(animate);
-    };
-
-    animate();
-  }, [value]);
-
-  return (
-    <Text style={[styles.scoreNumber, { color }]}>
-      {display}
-    </Text>
-  );
-}
-
-function InsightCard({
-  icon, title, value, unit, badge, color, onPress,
-}: {
-  icon: string;
-  title: string;
-  value: string;
-  unit: string;
-  badge?: string;
-  color: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable style={styles.insightCard} onPress={onPress}>
-      <Text style={styles.insightIcon}>{icon}</Text>
-      <Text style={styles.insightTitle}>{title}</Text>
-      <Text style={[styles.insightValue, { color }]}>{value}</Text>
-      <Text style={styles.insightUnit}>{unit}</Text>
-      {badge && (
-        <View style={[styles.insightBadge, { backgroundColor: `${color}20` }]}>
-          <Text style={[styles.insightBadgeText, { color }]}>{badge}</Text>
-        </View>
-      )}
-    </Pressable>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Styles
-// ─────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  content: {
-    paddingTop: 60,
-    paddingHorizontal: 20,
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 20,
-  },
-  appLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 2,
-    color: theme.colors.textTertiary,
-  },
-  petName: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: theme.colors.textPrimary,
-    marginTop: 2,
-  },
-  headerRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  twinStatus: {
-    fontSize: 11,
-    color: theme.colors.textTertiary,
-  },
-  twinDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: theme.colors.success,
-  },
-
-  // Score card
-  scoreCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.surfaceBorder,
-    padding: 28,
-    alignItems: "center",
-    overflow: "hidden",
-    marginBottom: 16,
-  },
-  scoreLabel: {
-    fontSize: 13,
-    color: theme.colors.textSecondary,
-    marginBottom: 8,
-  },
-  scoreNumber: {
-    fontSize: 72,
-    fontWeight: "700",
-    lineHeight: 80,
-  },
-  scoreLabelText: {
-    fontSize: 14,
-    fontWeight: "600",
-    marginTop: 4,
-  },
-  scoreSubtext: {
-    fontSize: 12,
-    color: theme.colors.textTertiary,
-    marginTop: 4,
-  },
-  factorGrid: {
-    width: "100%",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 24,
-  },
-  factorItem: {
-    width: (SCREEN_WIDTH - 80) / 2 - 4,
-    paddingVertical: 4,
-  },
-  factorHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 4,
-  },
-  factorName: {
-    fontSize: 11,
-    color: theme.colors.textTertiary,
-  },
-  factorScore: {
-    fontSize: 11,
-    color: theme.colors.textSecondary,
-    fontWeight: "600",
-  },
-  factorBar: {
-    height: 3,
-    borderRadius: 1.5,
-    backgroundColor: `${theme.colors.textTertiary}33`,
-    overflow: "hidden",
-  },
-  factorBarFill: {
-    height: "100%",
-    borderRadius: 1.5,
-  },
-
-  // Insights row
-  insightsRow: {
-    paddingVertical: 4,
-    gap: 10,
-    marginBottom: 16,
-  },
-  insightCard: {
-    width: 140,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
-    borderColor: theme.colors.surfaceBorder,
-    padding: 14,
-  },
-  insightIcon: {
-    fontSize: 22,
-    marginBottom: 8,
-  },
-  insightTitle: {
-    fontSize: 11,
-    color: theme.colors.textTertiary,
-    fontWeight: "500",
-    letterSpacing: 0.3,
-    textTransform: "uppercase",
-  },
-  insightValue: {
-    fontSize: 22,
-    fontWeight: "700",
-    marginTop: 4,
-  },
-  insightUnit: {
-    fontSize: 10,
-    color: theme.colors.textTertiary,
-    marginTop: 2,
-  },
-  insightBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 100,
-    alignSelf: "flex-start",
-    marginTop: 8,
-  },
-  insightBadgeText: {
-    fontSize: 10,
-    fontWeight: "600",
-  },
-
-  // Sections
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: theme.colors.textPrimary,
-    marginBottom: 12,
-  },
-
-  // Alerts
-  alertCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
-    padding: 16,
-    marginBottom: 8,
-  },
-  alertBadge: {
-    marginBottom: 8,
-  },
-  alertBadgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  alertTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: theme.colors.textPrimary,
-    marginBottom: 4,
-  },
-  alertDetail: {
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    lineHeight: 18,
-  },
-
-  // Care timeline
-  careItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.surfaceBorder,
-    gap: 10,
-  },
-  careDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  careContent: {
-    flex: 1,
-  },
-  careTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: theme.colors.textPrimary,
-  },
-  careDetail: {
-    fontSize: 11,
-    color: theme.colors.textTertiary,
-    marginTop: 2,
-  },
-  careBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 100,
-  },
-  careBadgeText: {
-    fontSize: 10,
-    fontWeight: "600",
-  },
-
-  // Actions
-  actionsGrid: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
-    borderColor: theme.colors.surfaceBorder,
-    padding: 14,
-    alignItems: "center",
-    gap: 6,
-  },
-  actionIcon: {
-    fontSize: 22,
-  },
-  actionLabel: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: theme.colors.textSecondary,
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-  },
-
-  // Empty state
-  emptyState: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: theme.colors.background,
-    padding: 40,
-  },
-  emptyEmoji: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: theme.colors.textPrimary,
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    marginBottom: 24,
-  },
-  primaryButton: {
-    backgroundColor: theme.colors.buttonPrimary,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: theme.radius.full,
-  },
-  primaryButtonText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: theme.colors.buttonPrimaryText,
-  },
+const s = StyleSheet.create({
+  kicker: { fontSize: 12, fontWeight: "700", letterSpacing: 1.6, color: c.textSecondary, marginBottom: 6 },
+  outOf: { fontSize: 13, color: c.textTertiary, marginTop: 2 },
+  completeness: { fontSize: 13, lineHeight: 19, color: c.textSecondary, textAlign: "center", maxWidth: 420, marginTop: 12 },
+  heroActions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 14 },
+  nextKicker: { fontSize: 11, fontWeight: "700", letterSpacing: 1, color: c.success },
+  nextText: { fontSize: 16, lineHeight: 23, fontWeight: "600", color: c.textPrimary, marginTop: 6 },
+  nextRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 12 },
+  nextPoints: { fontSize: 14, fontWeight: "700", color: c.success },
+  foodCard: { flexDirection: "row", alignItems: "center", gap: 14 },
+  foodName: { fontSize: 16, fontWeight: "700", color: c.textPrimary },
+  foodMeta: { fontSize: 14, lineHeight: 21, color: c.textSecondary, marginTop: 4 },
+  disclaimer: { fontSize: 12, lineHeight: 18, color: c.textTertiary, marginTop: 28 },
 });

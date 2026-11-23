@@ -12,16 +12,13 @@
       "resizeMode": "contain",
       "backgroundColor": "#0A0A0F"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.animapet.app",
-      "infoPlist": {
-        "NSCameraUsageDescription": "ANIMA needs camera access to scan BioCard diagnostic cartridges.",
-        "NSPhotoLibraryUsageDescription": "ANIMA uses photos to analyze your pet's visual health indicators.",
-        "NSLocationWhenInUseUsageDescription": "ANIMA uses your location for environmental health risk assessments.",
-        "NSMicrophoneUsageDescription": "ANIMA listens for coughs and breathing patterns to monitor respiratory health. Audio never leaves your device."
-      },
+      "infoPlist": {},
       "config": {
         "usesNonExemptEncryption": false
       }
@@ -32,34 +29,23 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A0A0F"
       },
-      "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "ACCESS_FINE_LOCATION",
-        "RECORD_AUDIO"
-      ]
+      "permissions": []
     },
     "web": {
       "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/favicon.png"
+      "output": "single",
+      "favicon": "./assets/favicon.png",
+      "name": "ANIMA — Pet Longevity Score & Food Ratings",
+      "shortName": "ANIMA",
+      "description": "A free, evidence-based Longevity Score for your dog or cat, and honest ratings for the food you feed.",
+      "themeColor": "#0A0A0F",
+      "backgroundColor": "#0A0A0F",
+      "lang": "en"
     },
     "plugins": [
       "expo-router",
-      "expo-camera",
-      "expo-image-picker",
-      "expo-location",
-      "expo-secure-store",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/notification-icon.png",
-          "color": "#10B981"
-        }
-      ]
-    ],
-    "experiments": {
-      "typedRoutes": true
-    }
+      "expo-asset",
+      "expo-font"
+    ]
   }
 }

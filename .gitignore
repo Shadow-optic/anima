@@ -2,6 +2,9 @@ node_modules/
 .npm-cache/
 .expo/
 .expo-shared/
+dist/
 .DS_Store
 .env
+.env.local
 npm-debug.log*
+expo-env.d.ts
