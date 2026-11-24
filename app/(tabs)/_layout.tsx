@@ -10,10 +10,11 @@ import { useActivePet } from "@/hooks/useData";
 import { useAuthStore } from "@/stores";
 
 const c = theme.colors;
-const ICONS: Record<string, string> = { index: "◎", nutrition: "🍽", shop: "🛍", care: "♡", profile: "○" };
+const ICONS: Record<string, string> = { index: "◎", twin: "◈", nutrition: "🍽", shop: "🛍", care: "♡", profile: "○" };
 
 const TABS = [
   { name: "index", title: "Score", href: "/(tabs)", path: "/" },
+  { name: "twin", title: "Twin", href: "/(tabs)/twin", path: "/twin" },
   { name: "nutrition", title: "Nutrition", href: "/(tabs)/nutrition", path: "/nutrition" },
   { name: "shop", title: "Shop", href: "/(tabs)/shop", path: "/shop" },
   { name: "care", title: "Care", href: "/(tabs)/care", path: "/care" },

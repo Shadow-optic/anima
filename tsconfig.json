@@ -16,10 +16,7 @@
     "hooks",
     "lib",
     "stores",
-    "shared",
-    "tests",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts"
+    "shared"
   ],
   "exclude": [
     "node_modules",
