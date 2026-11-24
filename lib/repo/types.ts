@@ -5,8 +5,10 @@ import type {
   NewCareEvent,
   NewMealLog,
   NewPet,
+  NewWeighIn,
   Pet,
   ScoreSnapshot,
+  WeighIn,
 } from "@/shared/types";
 
 /**
@@ -30,6 +32,11 @@ export interface Repo {
   listCare(petId: string): Promise<CareEvent[]>;
   addCare(event: NewCareEvent): Promise<CareEvent>;
   deleteCare(id: string): Promise<void>;
+
+  listWeighIns(petId: string): Promise<WeighIn[]>;
+  /** One weigh-in per pet per day: a second one on the same day replaces the first. */
+  addWeighIn(weighIn: NewWeighIn): Promise<WeighIn>;
+  deleteWeighIn(id: string): Promise<void>;
 
   listCustomFoods(): Promise<FoodProduct[]>;
   addCustomFood(food: Omit<FoodProduct, "id">): Promise<FoodProduct>;

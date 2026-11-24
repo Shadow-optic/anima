@@ -28,8 +28,10 @@ import type {
   NewCareEvent,
   NewMealLog,
   NewPet,
+  NewWeighIn,
   Pet,
   ScoreSnapshot,
+  WeighIn,
 } from "@/shared/types";
 
 function useRepo() {
@@ -45,6 +47,7 @@ const keys = {
   pets: (scope: string) => ["pets", scope] as const,
   meals: (scope: string, petId: string) => ["meals", scope, petId] as const,
   care: (scope: string, petId: string) => ["care", scope, petId] as const,
+  weighIns: (scope: string, petId: string) => ["weighIns", scope, petId] as const,
   foods: (scope: string) => ["foods", scope] as const,
   snapshots: (scope: string, petId: string) => ["snapshots", scope, petId] as const,
 };
@@ -72,7 +75,12 @@ export function useCreatePet() {
   const qc = useQueryClient();
   const setActivePetId = usePetStore((s) => s.setActivePetId);
   return useMutation({
-    mutationFn: (pet: NewPet) => repo.createPet(pet),
+    mutationFn: async (pet: NewPet) => {
+      const created = await repo.createPet(pet);
+      // The starting weight is the first point on the weight curve.
+      await repo.addWeighIn({ petId: created.id, date: new Date().toISOString().slice(0, 10), weightKg: created.weightKg }).catch(() => undefined);
+      return created;
+    },
     onSuccess: (pet) => {
       qc.setQueryData<Pet[]>(keys.pets(scope), (old) => [...(old ?? []), pet]);
       setActivePetId(pet.id);
@@ -196,6 +204,36 @@ export function useDeleteCare() {
     mutationFn: (event: CareEvent) => repo.deleteCare(event.id),
     onSuccess: (_void, event) => {
       qc.setQueryData<CareEvent[]>(keys.care(scope, event.petId), (old) => (old ?? []).filter((e) => e.id !== event.id));
+    },
+  });
+}
+
+// ── Weigh-ins ─────────────────────────────────
+
+export function useWeighIns(petId: string | undefined) {
+  const { repo, scope, ready } = useRepo();
+  return useQuery({
+    queryKey: keys.weighIns(scope, petId ?? ""),
+    queryFn: () => repo.listWeighIns(petId!),
+    enabled: ready && !!petId,
+  });
+}
+
+/** Record a weigh-in and, when it is the newest, make it the pet's current weight. */
+export function useAddWeighIn() {
+  const { repo, scope } = useRepo();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (w: NewWeighIn) => {
+      const saved = await repo.addWeighIn(w);
+      const all = await repo.listWeighIns(w.petId);
+      const newest = all[all.length - 1];
+      const pet = newest ? await repo.updatePet(w.petId, { weightKg: newest.weightKg }) : null;
+      return { saved, all, pet };
+    },
+    onSuccess: ({ all, pet }, w) => {
+      qc.setQueryData<WeighIn[]>(keys.weighIns(scope, w.petId), all);
+      if (pet) qc.setQueryData<Pet[]>(keys.pets(scope), (old) => (old ?? []).map((p) => (p.id === pet.id ? pet : p)));
     },
   });
 }

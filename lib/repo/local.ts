@@ -5,7 +5,7 @@
  * needs no sign-up. On native (no localStorage) it falls back to memory.
  */
 
-import type { CareEvent, FoodProduct, MealLog, Pet, ScoreSnapshot } from "@/shared/types";
+import type { CareEvent, FoodProduct, MealLog, Pet, ScoreSnapshot, WeighIn } from "@/shared/types";
 import { MEAL_HISTORY_DAYS, totalCalories, type Repo } from "./types";
 
 const KEY = "anima.local.v1";
@@ -15,11 +15,12 @@ interface LocalData {
   pets: Pet[];
   meals: MealLog[];
   care: CareEvent[];
+  weighIns: WeighIn[];
   foods: FoodProduct[];
   snapshots: ScoreSnapshot[];
 }
 
-const EMPTY: LocalData = { pets: [], meals: [], care: [], foods: [], snapshots: [] };
+const EMPTY: LocalData = { pets: [], meals: [], care: [], weighIns: [], foods: [], snapshots: [] };
 let memory: string | null = null;
 
 function storage(): Storage | null {
@@ -36,9 +37,11 @@ export function readLocal(): LocalData {
     if (!raw) return structuredCloneSafe(EMPTY);
     const parsed = JSON.parse(raw);
     return {
-      pets: Array.isArray(parsed.pets) ? parsed.pets : [],
+      // Pets saved before Portion Autopilot existed have no factor yet.
+      pets: (Array.isArray(parsed.pets) ? parsed.pets : []).map((p: Pet) => ({ ...p, calorieFactor: p.calorieFactor ?? 1, planReviewedAt: p.planReviewedAt ?? null })),
       meals: Array.isArray(parsed.meals) ? parsed.meals : [],
       care: Array.isArray(parsed.care) ? parsed.care : [],
+      weighIns: Array.isArray(parsed.weighIns) ? parsed.weighIns : [],
       foods: Array.isArray(parsed.foods) ? parsed.foods : [],
       snapshots: Array.isArray(parsed.snapshots) ? parsed.snapshots : [],
     };
@@ -106,6 +109,7 @@ export class LocalRepo implements Repo {
     data.pets = data.pets.filter((p) => p.id !== id);
     data.meals = data.meals.filter((m) => m.petId !== id);
     data.care = data.care.filter((c) => c.petId !== id);
+    data.weighIns = data.weighIns.filter((w) => w.petId !== id);
     data.snapshots = data.snapshots.filter((s) => s.petId !== id);
     writeLocal(data);
   }
@@ -155,6 +159,27 @@ export class LocalRepo implements Repo {
   async deleteCare(id: string) {
     const data = readLocal();
     data.care = data.care.filter((c) => c.id !== id);
+    writeLocal(data);
+  }
+
+  async listWeighIns(petId: string) {
+    return readLocal()
+      .weighIns.filter((w) => w.petId === petId)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  async addWeighIn(weighIn: Parameters<Repo["addWeighIn"]>[0]) {
+    const data = readLocal();
+    data.weighIns = data.weighIns.filter((w) => !(w.petId === weighIn.petId && w.date === weighIn.date));
+    const created: WeighIn = { ...weighIn, id: newId(), createdAt: new Date().toISOString() };
+    data.weighIns.push(created);
+    writeLocal(data);
+    return created;
+  }
+
+  async deleteWeighIn(id: string) {
+    const data = readLocal();
+    data.weighIns = data.weighIns.filter((w) => w.id !== id);
     writeLocal(data);
   }
 

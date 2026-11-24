@@ -4,7 +4,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CareEvent, FoodProduct, MealLog, NewPet, Pet, ScoreSnapshot } from "@/shared/types";
+import type { CareEvent, FoodProduct, MealLog, NewPet, Pet, ScoreSnapshot, WeighIn } from "@/shared/types";
 import { MEAL_HISTORY_DAYS, totalCalories, type Repo } from "./types";
 
 function must<T>(result: { data: T | null; error: { message: string } | null }): T {
@@ -31,6 +31,8 @@ function petFromRow(r: any): Pet {
     bodyCondition: r.body_condition,
     activityMinutesPerDay: r.activity_minutes_per_day,
     primaryFoodId: r.primary_food_id,
+    calorieFactor: Number(r.calorie_factor ?? 1),
+    planReviewedAt: r.plan_reviewed_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -48,6 +50,8 @@ function petToRow(p: Partial<NewPet>): Record<string, unknown> {
   if (p.bodyCondition !== undefined) row.body_condition = p.bodyCondition;
   if (p.activityMinutesPerDay !== undefined) row.activity_minutes_per_day = p.activityMinutesPerDay;
   if (p.primaryFoodId !== undefined) row.primary_food_id = p.primaryFoodId;
+  if (p.calorieFactor !== undefined) row.calorie_factor = p.calorieFactor;
+  if (p.planReviewedAt !== undefined) row.plan_reviewed_at = p.planReviewedAt;
   return row;
 }
 
@@ -64,6 +68,10 @@ function mealFromRow(r: any): MealLog {
 
 function careFromRow(r: any): CareEvent {
   return { id: r.id, petId: r.pet_id, kind: r.kind, date: r.date, note: r.note ?? undefined, createdAt: r.created_at };
+}
+
+function weighInFromRow(r: any): WeighIn {
+  return { id: r.id, petId: r.pet_id, date: r.date, weightKg: Number(r.weight_kg), createdAt: r.created_at };
 }
 
 export class SupabaseRepo implements Repo {
@@ -134,6 +142,26 @@ export class SupabaseRepo implements Repo {
 
   async deleteCare(id: string) {
     check(await this.db.from("care_events").delete().eq("id", id));
+  }
+
+  async listWeighIns(petId: string) {
+    return must(await this.db.from("weight_logs").select("*").eq("pet_id", petId).order("date")).map(weighInFromRow);
+  }
+
+  async addWeighIn(w: Parameters<Repo["addWeighIn"]>[0]) {
+    return weighInFromRow(
+      must(
+        await this.db
+          .from("weight_logs")
+          .upsert({ pet_id: w.petId, date: w.date, weight_kg: w.weightKg }, { onConflict: "pet_id,date" })
+          .select()
+          .single()
+      )
+    );
+  }
+
+  async deleteWeighIn(id: string) {
+    check(await this.db.from("weight_logs").delete().eq("id", id));
   }
 
   async listCustomFoods() {

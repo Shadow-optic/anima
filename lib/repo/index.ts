@@ -43,6 +43,9 @@ export async function moveGuestDataToAccount(): Promise<number> {
     for (const event of data.care.filter((c) => c.petId === id)) {
       await account.addCare({ petId: saved.id, kind: event.kind, date: event.date, note: event.note });
     }
+    for (const w of data.weighIns.filter((x) => x.petId === id)) {
+      await account.addWeighIn({ petId: saved.id, date: w.date, weightKg: w.weightKg });
+    }
     for (const snap of data.snapshots.filter((s) => s.petId === id)) {
       await account.saveSnapshot({ ...snap, petId: saved.id });
     }

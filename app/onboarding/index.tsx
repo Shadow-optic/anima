@@ -89,6 +89,8 @@ export default function Onboarding() {
       bodyCondition: bcs,
       activityMinutesPerDay: activity,
       primaryFoodId: foodId,
+      calorieFactor: 1,
+      planReviewedAt: null,
     };
   }, [species, breed, name, ageNum, weightKg, sex, neutered, bcs, activity, foodId]);
 

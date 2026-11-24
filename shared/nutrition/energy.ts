@@ -65,16 +65,26 @@ export function energyFactor(pet: Pick<Pet, "species" | "neutered" | "bodyCondit
 }
 
 /**
- * Daily calorie target. For overweight pets the target is computed at the
- * estimated ideal weight (each BCS point above 5 ≈ 10% over ideal).
+ * Ideal weight estimated from body condition: each point above 5 on the
+ * 9-point scale is taken as about 10% over ideal, each point below 4 as about
+ * 10% under. A working estimate; a vet's target weight is better.
+ */
+export function idealWeightKg(weightKg: number, bodyCondition: number): number {
+  if (bodyCondition > 5) return weightKg / (1 + (bodyCondition - 5) * 0.1);
+  if (bodyCondition < 4) return weightKg / (1 - (4 - bodyCondition) * 0.1);
+  return weightKg;
+}
+
+/**
+ * Textbook daily calorie target. For pets above or below ideal condition the
+ * target is computed at the estimated ideal weight.
  */
 export function dailyCalorieTarget(
   pet: Pick<Pet, "species" | "neutered" | "bodyCondition" | "weightKg">,
   stage: LifeStage
 ): number {
-  const overBy = Math.max(0, pet.bodyCondition - 5);
-  const idealWeight = pet.weightKg / (1 + overBy * 0.1);
-  const basis = pet.bodyCondition >= 6 ? idealWeight : pet.weightKg;
+  const growing = stage === "GROWTH_EARLY" || stage === "GROWTH_LATE";
+  const basis = growing ? pet.weightKg : idealWeightKg(pet.weightKg, pet.bodyCondition);
   return Math.round(restingEnergyKcal(basis) * energyFactor(pet, stage));
 }
 
