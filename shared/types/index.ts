@@ -112,6 +112,8 @@ export interface FoodProduct {
   aafcoStatement?: string;
   /** Where the label data came from, for real products. */
   source?: { url: string; type: "manufacturer" | "retailer"; retrievedAt: string };
+  /** Anything a reader should know about how a value was obtained. */
+  note?: string;
   /** Illustrative catalog entry, not a real product. */
   isSample?: boolean;
   /** Entered by a user from a label. */

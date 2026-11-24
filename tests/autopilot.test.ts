@@ -46,7 +46,7 @@ test("blames intake, not the plan, when logged calories are well over it", () =>
 });
 
 test("never plans below the floor: refers to a vet instead", () => {
-  const p = pet({ calorieFactor: 0.82 });
+  const p = pet({ calorieFactor: 0.6 });
   const r = run(p, [w(14, 38), w(0, 38)]);
   assert.equal(r.review.action, "SEE_VET");
   assert.ok(r.planKcal >= Math.round(restingEnergyKcal(r.idealWeightKg) * FLOOR_OF_RER) - 2);

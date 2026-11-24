@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { theme } from "@/config/theme";
 import { Badge, Card, LinkText, PageHeader, Screen, SectionTitle } from "@/components/ui";
 import {
+  AUTOPILOT_METHOD,
   FACTOR_EVIDENCE,
   FOOD_DISCLAIMER,
   FOOD_SCORE_METHOD,
@@ -80,11 +81,26 @@ export default function Science() {
       <Card style={{ marginBottom: 12 }}>
         <Text style={s.p}>
           Every food is graded from data printed on its label or published by its maker. Grades: A 85 and above, B 70–84, C
-          55–69, D 40–54, E below 40. No brand can pay to change a grade.
+          55–69, D 40–54, E below 40. No brand can pay to change a grade. Each product page links to the page its label
+          data was read from and the date; where a maker does not publish a value, the page says what was assumed. A
+          grade reflects the label as read on that date, and a low confidence figure means much of it rests on unknowns.
         </Text>
         <Text style={s.p}>{FOOD_DISCLAIMER}</Text>
       </Card>
       {FOOD_SCORE_METHOD.map((m) => (
+        <Card key={m.title} style={{ marginBottom: 12 }}>
+          <Text style={s.h}>{m.title}</Text>
+          <Text style={s.p}>{m.body}</Text>
+          {referencesFor(m.references).map((r) => (
+            <LinkText key={r.id} href={r.url} style={s.cite}>
+              {r.citation}
+            </LinkText>
+          ))}
+        </Card>
+      ))}
+
+      <SectionTitle>Portion Autopilot</SectionTitle>
+      {AUTOPILOT_METHOD.map((m) => (
         <Card key={m.title} style={{ marginBottom: 12 }}>
           <Text style={s.h}>{m.title}</Text>
           <Text style={s.p}>{m.body}</Text>

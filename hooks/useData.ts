@@ -10,7 +10,7 @@ import { useEffect, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRepo } from "@/lib/repo";
 import { useAuthStore, usePetStore } from "@/stores";
-import { SAMPLE_CATALOG } from "@/shared/food/catalog";
+import { REAL_CATALOG } from "@/shared/food/real";
 import { rateFood, type FoodRating } from "@/shared/food/rating";
 import {
   ALGORITHM_VERSION,
@@ -114,12 +114,12 @@ export function useDeletePet() {
 
 // ── Foods ─────────────────────────────────────
 
-/** Catalog plus the user's own label entries. */
+/** The real catalog plus the user's own label entries. */
 export function useFoods(): { foods: FoodProduct[]; byId: Map<string, FoodProduct> } {
   const { repo, scope, ready } = useRepo();
   const { data: custom } = useQuery({ queryKey: keys.foods(scope), queryFn: () => repo.listCustomFoods(), enabled: ready });
   return useMemo(() => {
-    const foods = [...(custom ?? []), ...SAMPLE_CATALOG];
+    const foods = [...(custom ?? []), ...REAL_CATALOG];
     return { foods, byId: new Map(foods.map((f) => [f.id, f])) };
   }, [custom]);
 }

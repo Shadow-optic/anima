@@ -95,6 +95,41 @@ export const REFERENCES: Record<string, Reference> = {
     finding:
       "Resting energy requirement = 70 × body weight(kg)^0.75, with life-stage multipliers as a starting point. Treats should stay at or under 10% of daily calories.",
   },
+  aaha2014: {
+    id: "aaha2014",
+    citation:
+      "Brooks D, Churchill J, Fein K, et al. 2014 AAHA Weight Management Guidelines for Dogs and Cats. J Am Anim Hosp Assoc. 2014;50(1):1-11.",
+    url: "https://doi.org/10.5326/JAAHA-MS-6331",
+    finding:
+      "Desired weight loss is 1–2% a week in dogs and 0.5–2% in cats. Recheck every two weeks until the rate is established. If loss is too fast, raise calories by 10%; if too slow with adherence verified, cut by 10–20%. Each body condition point above 5 of 9 is about 10% overweight. Below 60% of resting energy at ideal weight needs a veterinary nutritionist.",
+  },
+  bermingham2014: {
+    id: "bermingham2014",
+    citation:
+      "Bermingham EN, Thomas DG, Cave NJ, Morris PJ, Butterwick RF, German AJ. Energy requirements of adult dogs: a meta-analysis. PLoS One. 2014;9(10):e109681.",
+    url: "https://doi.org/10.1371/journal.pone.0109681",
+    finding:
+      "Across 29 studies, maintenance energy needs averaged 142.8 kcal per kg^0.75 a day with a standard deviation of 55.3. The authors conclude the mean \"will not adequately reflect the actual requirement for many dogs\".",
+  },
+  apop2022: {
+    id: "apop2022",
+    citation: "Association for Pet Obesity Prevention. 2022 State of U.S. Pet Obesity report.",
+    url: "https://petobesityprevention.org/2022-state-of-pet-obesity-report-summary",
+    finding: "Veterinary professionals classified 59% of dogs and 61% of cats as overweight or having obesity.",
+  },
+  pna2023: {
+    id: "pna2023",
+    citation: "Pet Nutrition Alliance. Pet Food Manufacturer Evaluation Report. 2023.",
+    url: "https://petnutritionalliance.org/wp-content/uploads/2023/04/Pet-Nutrition-Alliance-Pet-Food-Manufacturer-Report-2023.pdf",
+    finding:
+      "Tabulates makers' own answers on whether they employ a qualified nutritionist, own their plants and can supply nutrient data. Several makers did not respond.",
+  },
+  fdaRecalls: {
+    id: "fdaRecalls",
+    citation: "U.S. Food and Drug Administration. Animal & Veterinary Recalls & Withdrawals.",
+    url: "https://www.fda.gov/animal-veterinary/safety-health/recalls-withdrawals",
+    finding: "The public list of pet food recalls. Older entries are archived, so it is not a complete five-year record.",
+  },
   aafcoProfiles: {
     id: "aafcoProfiles",
     citation: "AAFCO. Dog and Cat Food Nutrient Profiles, in: Methods for Substantiating Nutritional Adequacy of Dog and Cat Foods.",
@@ -275,13 +310,13 @@ export const FOOD_SCORE_METHOD: MethodNote[] = [
   },
   {
     title: "Maker transparency (15 points)",
-    body: "The WSAVA questions: does the maker employ a qualified nutritionist, make the food in its own plants, provide a full nutrient analysis, and run feeding trials or publish research. Unanswered questions earn partial credit, never full.",
-    references: ["wsavaSelecting"],
+    body: "The WSAVA questions: does the maker employ a qualified nutritionist, make the food in its own plants, provide a full nutrient analysis, and run feeding trials or publish research. An answer counts only when the company states it itself, on its website or in the Pet Nutrition Alliance survey. Unanswered questions earn partial credit, never full.",
+    references: ["wsavaSelecting", "pna2023"],
   },
   {
     title: "Recall record (10 points)",
-    body: "Recalls of the brand in the last five years. None is full marks, one is half, two or more is zero.",
-    references: [],
+    body: "Recalls of the brand in the last five years. A verified clean record is full marks, one recall is half, two or more is zero. The FDA's public list is incomplete for part of that period, so a brand with no recall found is scored as unknown (partial credit), not as clean. Recalls of a maker's separate prescription line are not counted against its retail foods.",
+    references: ["fdaRecalls"],
   },
   {
     title: "Fit for your pet",
@@ -292,6 +327,30 @@ export const FOOD_SCORE_METHOD: MethodNote[] = [
     title: "Treats and toppers",
     body: "Not meant to be complete, so they are scored on ingredients (40), calories per treat (30), maker transparency (15) and recall record (15). Treats should stay under 10% of daily calories.",
     references: ["aaha2021"],
+  },
+];
+
+/** How Portion Autopilot works, for the science page. */
+export const AUTOPILOT_METHOD: MethodNote[] = [
+  {
+    title: "Why a formula is not enough",
+    body: "Every feeding guide starts from an equation for the average animal. Measured needs vary so widely around that average that the estimate is wrong for many pets, which is one reason most dogs and cats in the US are overweight. Autopilot treats the formula as a first guess and corrects it from the pet's own weight.",
+    references: ["bermingham2014", "apop2022"],
+  },
+  {
+    title: "The loop",
+    body: "Feed a measured portion. Weigh every two weeks on the same scale. Autopilot compares the change with the safe range for the goal: losing 1–2% of body weight a week for dogs and 0.5–2% for cats, or holding within 0.5% a week at ideal weight. Too slow, it proposes 10% less; too fast, 10% more; in range, no change. Each applied step is stored as the pet's personal factor, so the plan converges on what this animal needs.",
+    references: ["aaha2014", "aaha2021"],
+  },
+  {
+    title: "Telling a wrong plan from a plan not followed",
+    body: "When at least half the days were logged, Autopilot checks intake before it touches the plan. If logged calories ran more than 15% over the plan, it says so and leaves the plan alone, because the guideline is to adjust only once adherence is verified.",
+    references: ["aaha2014"],
+  },
+  {
+    title: "Limits it will not cross",
+    body: "It never plans below 60% of resting energy at ideal weight, the point at which the guidelines call for a veterinary nutritionist. It does not restrict growing animals. Weight that falls while the full portion is eaten is flagged for a vet, not answered with more food. Every change is a proposal the owner applies. Ideal weight is estimated at 10% per body condition point, so a vet's target weight is better where there is one.",
+    references: ["aaha2014"],
   },
 ];
 

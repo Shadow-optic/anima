@@ -42,10 +42,10 @@ export const REVIEW_DAYS = 14;
 /** Size of one adjustment. */
 export const STEP = 0.1;
 /** The personal factor never leaves this range without a vet. */
-export const FACTOR_MIN = 0.7;
+export const FACTOR_MIN = 0.6;
 export const FACTOR_MAX = 1.4;
 /** Never plan fewer calories than this share of resting energy at ideal weight. */
-export const FLOOR_OF_RER = 0.8;
+export const FLOOR_OF_RER = 0.6;
 
 const DAY_MS = 86400000;
 
@@ -243,7 +243,7 @@ export function buildAutopilot(input: AutopilotInput): AutopilotPlan {
         if (under) {
           return { action: "FOLLOW_PLAN", headline: "Losing too fast: feed the full plan", detail: `${moved}${eating} Bring portions up to the plan before changing it.` };
         }
-        const warn = pet.species === "CAT" ? " Rapid weight loss in cats can cause serious liver disease, so do not let this continue." : "";
+        const warn = pet.species === "CAT" ? " Cats should not lose faster than this: severe restriction raises the risk of serious liver disease." : "";
         return propose(1, "Losing too fast: add 10%", `${moved} The safe range is ${rates.loseMin}–${rates.loseMax}% a week.${warn}${eating}`);
       }
       if (loss >= rates.loseMin) {
