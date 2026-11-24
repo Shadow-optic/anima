@@ -1,4 +1,5 @@
-import { describe, test, expect } from "vitest";
+import { describe, test } from "node:test";
+import assert from "node:assert/strict";
 import {
   factorsToMasses,
   curvatureAt,
@@ -33,50 +34,50 @@ const poor: ScoreFactors = {
 describe("curvature", () => {
   test("factorsToMasses places 6 masses on a ring", () => {
     const masses = factorsToMasses(healthy);
-    expect(masses).toHaveLength(6);
+    assert.equal(masses.length, 6);
     for (const m of masses) {
       const r = Math.sqrt(m.x * m.x + m.y * m.y);
-      expect(r).toBeCloseTo(0.55, 1);
+      assert.ok(Math.abs(r - 0.55) < 0.05);
     }
   });
 
   test("healthy pet has positive curvature at centre", () => {
     const masses = factorsToMasses(healthy);
-    expect(curvatureAt(0, 0, masses)).toBeGreaterThan(0);
+    assert.ok(curvatureAt(0, 0, masses) > 0);
   });
 
   test("poor-health pet has negative curvature at centre", () => {
     const masses = factorsToMasses(poor);
-    expect(curvatureAt(0, 0, masses)).toBeLessThan(0);
+    assert.ok(curvatureAt(0, 0, masses) < 0);
   });
 
   test("curvature decays away from masses", () => {
     const masses = factorsToMasses(healthy);
     const near = Math.abs(curvatureAt(masses[0].x, masses[0].y, masses));
     const far = Math.abs(curvatureAt(0.95, 0.95, masses));
-    expect(near).toBeGreaterThan(far);
+    assert.ok(near > far);
   });
 
   test("buildHeightMap returns correct size", () => {
     const masses = factorsToMasses(healthy);
     const map = buildHeightMap(masses, 32);
-    expect(map.length).toBe(32 * 32);
+    assert.equal(map.length, 32 * 32);
   });
 });
 
 describe("hex grid", () => {
   test("lodRings scales with zoom", () => {
-    expect(lodRings(0.5)).toBe(6);
-    expect(lodRings(1.2)).toBe(9);
-    expect(lodRings(2.0)).toBe(12);
+    assert.equal(lodRings(0.5), 6);
+    assert.equal(lodRings(1.2), 9);
+    assert.equal(lodRings(2.0), 12);
   });
 
   test("buildHexGrid produces cells inside the disc", () => {
     const cells = buildHexGrid(6, () => 0);
-    expect(cells.length).toBeGreaterThan(30);
+    assert.ok(cells.length > 30);
     for (const cell of cells) {
       const r = Math.sqrt(cell.cx * cell.cx + cell.cy * cell.cy);
-      expect(r).toBeLessThanOrEqual(1);
+      assert.ok(r <= 1);
     }
   });
 });
@@ -89,15 +90,15 @@ describe("particle flow", () => {
       stepParticle(p, masses);
     }
     const r = Math.sqrt(p.x * p.x + p.y * p.y);
-    expect(r).toBeLessThanOrEqual(1);
+    assert.ok(r <= 1);
   });
 
   test("particle ages correctly", () => {
     const masses = factorsToMasses(healthy);
     const p = spawnParticle(masses[0], Math.random);
-    expect(p.age).toBe(0);
+    assert.equal(p.age, 0);
     stepParticle(p, masses);
-    expect(p.age).toBe(1);
+    assert.equal(p.age, 1);
   });
 });
 
@@ -109,8 +110,8 @@ describe("orbifold", () => {
       trail.push([Math.cos(angle) * 0.5, Math.sin(angle) * 0.5]);
     }
     const samples = orbifoldFlow(trail);
-    expect(samples).toHaveLength(72);
-    expect(flowCircularity(samples)).toBeGreaterThan(0.2);
+    assert.equal(samples.length, 72);
+    assert.ok(flowCircularity(samples) > 0.2);
   });
 
   test("collapsed trail has low circularity", () => {
@@ -119,6 +120,6 @@ describe("orbifold", () => {
       trail.push([0.1 * i / 72, 0]);
     }
     const samples = orbifoldFlow(trail);
-    expect(flowCircularity(samples)).toBeLessThan(0.5);
+    assert.ok(flowCircularity(samples) < 0.5);
   });
 });
