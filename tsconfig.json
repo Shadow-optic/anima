@@ -16,8 +16,7 @@
     "hooks",
     "lib",
     "stores",
-    "shared",
-    "tests"
+    "shared"
   ],
   "exclude": [
     "node_modules",
