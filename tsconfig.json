@@ -4,27 +4,26 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"],
-      "@shared/*": ["./shared/*"]
+      "@/*": [
+        "./*"
+      ]
     }
   },
   "include": [
-    "app/**/*.ts",
-    "app/**/*.tsx",
-    "components/**/*.ts",
-    "components/**/*.tsx",
-    "config/**/*.ts",
-    "hooks/**/*.ts",
-    "stores/**/*.ts",
-    "shared/**/*.ts",
-    "shared/**/*.tsx",
+    "app",
+    "components",
+    "config",
+    "hooks",
+    "lib",
+    "stores",
+    "shared",
+    "tests",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
   ],
   "exclude": [
     "node_modules",
-    "server",
-    "*.ts",
-    "*.tsx"
+    "legacy",
+    "dist"
   ]
 }

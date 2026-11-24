@@ -1,555 +1,349 @@
 /**
- * ANIMA Onboarding — Pet Profile Creation Wizard
+ * Onboarding: five short steps to a first Longevity Score.
  *
- * Multi-step flow that collects pet data and reveals
- * their first Longevity Score at the end.
- *
- * Uses client-side pure Score for instant, zero-network reveal
- * while still creating the pet on the backend.
+ * Works without an account. The Score is computed in the browser, the pet is
+ * saved through the repo (this browser for guests, the account otherwise),
+ * and the reveal offers the share card straight away.
  */
 
-import { useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import * as Haptics from "expo-haptics";
-import { getScoreColor, getScoreLabel, theme } from "@/config/theme";
-import { useCreatePet } from "@/hooks/useApi";
-import { ageYearsToDob, computePureScore, type PureScoreResult } from "@/shared/score/pureScore";
+import { isSupabaseConfigured } from "@/config/supabase";
+import { theme } from "@/config/theme";
+import { Button, Card, Field, LinkText, Notice, ScoreNumber, Screen, Segmented } from "@/components/ui";
+import { FoodRow } from "@/components/food";
+import { FactorList } from "@/components/score";
+import { SharePanel } from "@/components/ShareCard";
+import { useCreatePet, useFoods } from "@/hooks/useData";
+import { buildShareCard } from "@/lib/share";
+import { useAuthStore } from "@/stores";
+import { breedsFor } from "@/shared/constants/breeds";
+import { rateFood } from "@/shared/food/rating";
+import { ageYearsToDob } from "@/shared/nutrition/energy";
+import { SCORE_DISCLAIMER } from "@/shared/score/evidence";
+import { computeLongevityScore, petContext, summariseDiet } from "@/shared/score/longevity";
+import type { LongevityScore, NewPet, Pet, Sex, Species } from "@/shared/types";
 
-type Step = "species" | "breed" | "basics" | "conditions" | "computing" | "reveal";
+const c = theme.colors;
+type Step = "species" | "breed" | "basics" | "lifestyle" | "reveal";
+const STEPS: Step[] = ["species", "breed", "basics", "lifestyle"];
 
-const COMMON_DOG_BREEDS = [
-  "Labrador Retriever", "Golden Retriever", "German Shepherd", "French Bulldog",
-  "Bulldog", "Poodle", "Beagle", "Rottweiler", "Dachshund", "Siberian Husky",
-  "Boxer", "Great Dane", "Doberman", "Australian Shepherd", "Cavalier King Charles Spaniel",
-  "Shih Tzu", "Yorkshire Terrier", "Chihuahua", "Pomeranian", "Mixed Breed",
+export const BCS_TEXT: Record<number, string> = {
+  1: "Emaciated. Ribs, spine and hip bones stand out from a distance.",
+  2: "Very thin. Ribs and spine easily seen, no body fat you can feel.",
+  3: "Thin. Ribs easily felt and may be visible; obvious waist.",
+  4: "Lean (ideal). Ribs easily felt with minimal fat; clear waist from above.",
+  5: "Ideal. Ribs felt without excess fat; waist visible behind the ribs.",
+  6: "Slightly overweight. Ribs felt through a slight excess of fat; waist just visible.",
+  7: "Overweight. Ribs hard to feel under fat; waist absent or barely visible.",
+  8: "Obese. Ribs felt only with firm pressure; no waist; belly may sag.",
+  9: "Severely obese. Heavy fat over chest, spine and tail base; belly distended.",
+};
+
+const ACTIVITY = [
+  { value: 15, label: "Under 20 min" },
+  { value: 30, label: "About 30 min" },
+  { value: 60, label: "About an hour" },
+  { value: 90, label: "90 min" },
+  { value: 120, label: "2 hours or more" },
 ];
 
-const COMMON_CAT_BREEDS = [
-  "Domestic Shorthair", "Domestic Longhair", "Siamese", "Persian", "Maine Coon",
-  "Ragdoll", "Bengal", "Abyssinian", "British Shorthair", "Scottish Fold",
-  "Sphynx", "Birman", "Russian Blue", "Mixed Breed",
-];
-
-export default function OnboardingScreen() {
+export default function Onboarding() {
   const router = useRouter();
   const createPet = useCreatePet();
+  const { foods, byId } = useFoods();
+  const guest = useAuthStore((s) => s.status) !== "account";
 
   const [step, setStep] = useState<Step>("species");
-  const [form, setForm] = useState({
-    species: "" as "DOG" | "CAT" | "",
-    breed: "",
-    name: "",
-    ageYears: "",
-    sex: "" as "MALE" | "FEMALE" | "",
-    neutered: true,
-    weightKg: "",
-    bodyCondition: 5,
-  });
-  const [pureResult, setPureResult] = useState<PureScoreResult | null>(null);
-  const [serverScore, setServerScore] = useState<number | null>(null);
+  const [species, setSpecies] = useState<Species | null>(null);
+  const [breed, setBreed] = useState("");
+  const [breedQuery, setBreedQuery] = useState("");
+  const [name, setName] = useState("");
+  const [age, setAge] = useState("");
+  const [weight, setWeight] = useState("");
+  const [unit, setUnit] = useState<"kg" | "lb">("lb");
+  const [sex, setSex] = useState<Sex | null>(null);
+  const [neutered, setNeutered] = useState(true);
+  const [bcs, setBcs] = useState(5);
+  const [activity, setActivity] = useState<number | null>(null);
+  const [foodId, setFoodId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ pet: Pet; score: LongevityScore } | null>(null);
+  const [sharing, setSharing] = useState(false);
 
-  const updateForm = (updates: Partial<typeof form>) => setForm({ ...form, ...updates });
+  const ageNum = parseFloat(age.replace(",", "."));
+  const weightNum = parseFloat(weight.replace(",", "."));
+  const weightKg = unit === "lb" ? weightNum / 2.2046 : weightNum;
 
-  const handleCreatePet = async () => {
-    if (!form.species || !form.breed || !form.name || !form.weightKg) return;
+  const draft: NewPet | null = useMemo(() => {
+    if (!species || !breed || !Number.isFinite(ageNum) || !Number.isFinite(weightKg)) return null;
+    return {
+      name: name.trim(),
+      species,
+      breed,
+      dateOfBirth: ageYearsToDob(ageNum),
+      sex: sex ?? "FEMALE",
+      neutered,
+      weightKg: Math.round(weightKg * 10) / 10,
+      bodyCondition: bcs,
+      activityMinutesPerDay: activity,
+      primaryFoodId: foodId,
+    };
+  }, [species, breed, name, ageNum, weightKg, sex, neutered, bcs, activity, foodId]);
 
-    const ageNum = parseFloat(form.ageYears) || 3;
-    const dob = ageYearsToDob(ageNum);
-    const weight = parseFloat(form.weightKg);
+  const foodChoices = useMemo(() => {
+    if (!species || !draft) return [];
+    const ctx = petContext(draft);
+    return foods
+      .filter((f) => f.category === "COMPLETE" && (f.species === species || f.species === "BOTH"))
+      .map((food) => ({ food, rating: rateFood(food, ctx) }));
+  }, [foods, species, draft]);
 
-    // Instant client-side Score (zero network)
-    const local = computePureScore({
-      species: form.species as "DOG" | "CAT",
-      breed: form.breed,
-      dateOfBirth: dob,
-      weightKg: weight,
-      bodyCondition: form.bodyCondition,
-      neutered: form.neutered,
-    });
-    setPureResult(local);
-    setStep("computing");
+  const validateBasics = (): boolean => {
+    if (!name.trim()) return fail("Add your pet's name.");
+    if (!Number.isFinite(ageNum) || ageNum < 0.1 || ageNum > 35) return fail("Enter an age in years, for example 3 or 0.5.");
+    if (!Number.isFinite(weightKg) || weightKg < 0.3 || weightKg > 120) return fail("Enter a weight.");
+    if (!sex) return fail("Choose a sex.");
+    setError(null);
+    return true;
+  };
+  const fail = (m: string) => {
+    setError(m);
+    return false;
+  };
 
+  const finish = async () => {
+    if (!draft) return;
+    setError(null);
     try {
-      const result = await createPet.mutateAsync({
-        name: form.name,
-        species: form.species as "DOG" | "CAT",
-        breed: form.breed,
-        dateOfBirth: dob,
-        sex: (form.sex as "MALE" | "FEMALE") || "MALE",
-        neutered: form.neutered,
-        weightKg: weight,
-        bodyCondition: form.bodyCondition,
-      });
-
-      setServerScore(result.currentScore?.score ?? local.score);
-
-      setTimeout(() => {
-        setStep("reveal");
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }, 1800);
-    } catch {
-      // Still show the pure Score so the user is not blocked
-      setServerScore(local.score);
-      setTimeout(() => {
-        setStep("reveal");
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }, 1200);
+      const pet = await createPet.mutateAsync(draft);
+      const score = computeLongevityScore({ pet, diet: summariseDiet(pet, [], byId) });
+      setResult({ pet, score });
+      setStep("reveal");
+    } catch (e: any) {
+      setError(e?.message ?? "Could not save. Try again.");
     }
   };
 
-  const displayScore = serverScore ?? pureResult?.score ?? null;
-  const displayBreakdown = pureResult?.breakdown ?? [];
-
-  const renderStep = () => {
-    switch (step) {
-      case "species":
-        return (
-          <View style={s.stepContent}>
-            <Text style={s.stepTitle}>What kind of pet?</Text>
-            <Text style={s.stepSubtitle}>ANIMA supports dogs and cats</Text>
-            <View style={s.choiceRow}>
-              {[
-                { value: "DOG", emoji: "🐕", label: "Dog" },
-                { value: "CAT", emoji: "🐈", label: "Cat" },
-              ].map((opt) => (
-                <Pressable
-                  key={opt.value}
-                  style={[s.choiceCard, form.species === opt.value && s.choiceCardActive]}
-                  onPress={() => {
-                    updateForm({ species: opt.value as any });
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setTimeout(() => setStep("breed"), 200);
-                  }}
-                >
-                  <Text style={s.choiceEmoji}>{opt.emoji}</Text>
-                  <Text style={s.choiceLabel}>{opt.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        );
-
-      case "breed": {
-        const breeds = form.species === "DOG" ? COMMON_DOG_BREEDS : COMMON_CAT_BREEDS;
-        return (
-          <View style={s.stepContent}>
-            <Text style={s.stepTitle}>What breed?</Text>
-            <Text style={s.stepSubtitle}>This shapes genetic baseline and ideal weight ranges</Text>
-            <ScrollView style={s.breedList} showsVerticalScrollIndicator={false}>
-              {breeds.map((breed) => (
-                <Pressable
-                  key={breed}
-                  style={[s.breedItem, form.breed === breed && s.breedItemActive]}
-                  onPress={() => {
-                    updateForm({ breed });
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setTimeout(() => setStep("basics"), 200);
-                  }}
-                >
-                  <Text style={[s.breedText, form.breed === breed && s.breedTextActive]}>{breed}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        );
-      }
-
-      case "basics":
-        return (
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={s.stepContent}>
-            <Text style={s.stepTitle}>Tell us about {form.name || "your pet"}</Text>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={s.fieldLabel}>Name</Text>
-              <TextInput
-                style={s.input}
-                value={form.name}
-                onChangeText={(v) => updateForm({ name: v })}
-                placeholder="Luna"
-                placeholderTextColor={theme.colors.textTertiary}
-              />
-
-              <Text style={s.fieldLabel}>Age (years)</Text>
-              <TextInput
-                style={s.input}
-                value={form.ageYears}
-                onChangeText={(v) => updateForm({ ageYears: v })}
-                placeholder="3"
-                placeholderTextColor={theme.colors.textTertiary}
-                keyboardType="decimal-pad"
-              />
-
-              <Text style={s.fieldLabel}>Weight (kg)</Text>
-              <TextInput
-                style={s.input}
-                value={form.weightKg}
-                onChangeText={(v) => updateForm({ weightKg: v })}
-                placeholder="25"
-                placeholderTextColor={theme.colors.textTertiary}
-                keyboardType="decimal-pad"
-              />
-
-              <Text style={s.fieldLabel}>Sex</Text>
-              <View style={s.choiceRowSmall}>
-                {[{ v: "MALE", l: "Male" }, { v: "FEMALE", l: "Female" }].map((opt) => (
-                  <Pressable
-                    key={opt.v}
-                    style={[s.choiceSmall, form.sex === opt.v && s.choiceSmallActive]}
-                    onPress={() => updateForm({ sex: opt.v as any })}
-                  >
-                    <Text style={[s.choiceSmallText, form.sex === opt.v && { color: theme.colors.textPrimary }]}>
-                      {opt.l}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={s.fieldLabel}>Spayed / Neutered?</Text>
-              <View style={s.choiceRowSmall}>
-                {[{ v: true, l: "Yes" }, { v: false, l: "No" }].map((opt) => (
-                  <Pressable
-                    key={String(opt.v)}
-                    style={[s.choiceSmall, form.neutered === opt.v && s.choiceSmallActive]}
-                    onPress={() => updateForm({ neutered: opt.v })}
-                  >
-                    <Text style={[s.choiceSmallText, form.neutered === opt.v && { color: theme.colors.textPrimary }]}>
-                      {opt.l}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={s.fieldLabel}>Body Condition (1–9)</Text>
-              <View style={s.bcsRow}>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
-                  <Pressable
-                    key={n}
-                    style={[s.bcsBtn, form.bodyCondition === n && s.bcsBtnActive]}
-                    onPress={() => updateForm({ bodyCondition: n })}
-                  >
-                    <Text style={[s.bcsBtnText, form.bodyCondition === n && { color: theme.colors.textPrimary }]}>
-                      {n}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={s.bcsHint}>4–5 is ideal. 1 = very thin, 9 = obese.</Text>
-
-              <Pressable
-                style={[s.nextBtn, (!form.name || !form.weightKg) && s.nextBtnDisabled]}
-                onPress={() => setStep("conditions")}
-                disabled={!form.name || !form.weightKg}
-              >
-                <Text style={s.nextBtnText}>Continue</Text>
-              </Pressable>
-            </ScrollView>
-          </KeyboardAvoidingView>
-        );
-
-      case "conditions":
-        return (
-          <View style={s.stepContent}>
-            <Text style={s.stepTitle}>Ready for {form.name}'s Score?</Text>
-            <Text style={s.stepSubtitle}>
-              We compute a starting Longevity Score from breed genetics, age, weight, and body condition.
-              It gets sharper as you log meals and add care data.
-            </Text>
-            <View style={s.summaryCard}>
-              <Text style={s.summaryLine}>
-                {form.species === "DOG" ? "🐕" : "🐈"} {form.name}
-              </Text>
-              <Text style={s.summaryLine}>{form.breed}</Text>
-              <Text style={s.summaryLine}>
-                {form.weightKg} kg · BCS {form.bodyCondition}/9 · {form.ageYears || "~3"} yrs
-              </Text>
-              <Text style={s.summaryLine}>
-                {form.sex === "MALE" ? "Male" : form.sex === "FEMALE" ? "Female" : "—"} ·{" "}
-                {form.neutered ? "Neutered" : "Intact"}
-              </Text>
-            </View>
-            <Pressable style={s.revealBtn} onPress={handleCreatePet}>
-              <Text style={s.revealBtnText}>Compute Longevity Score</Text>
-            </Pressable>
-          </View>
-        );
-
-      case "computing":
-        return (
-          <View style={[s.stepContent, { justifyContent: "center", alignItems: "center" }]}>
-            <Text style={{ fontSize: 56, marginBottom: 24 }}>🧬</Text>
-            <Text style={s.computingTitle}>Computing Score…</Text>
-            <Text style={s.computingSub}>
-              Genetic baseline · body condition · age-adjusted health · nutrition readiness
-            </Text>
-            {pureResult && (
-              <Text style={s.computingPreview}>
-                Preview {pureResult.score} · {pureResult.label}
-              </Text>
-            )}
-          </View>
-        );
-
-      case "reveal": {
-        const scoreColor = displayScore != null ? getScoreColor(displayScore) : theme.colors.textPrimary;
-        const label = displayScore != null ? getScoreLabel(displayScore) : "—";
-        return (
-          <ScrollView contentContainerStyle={[s.stepContent, { alignItems: "center", paddingBottom: 48 }]}>
-            <Text style={s.revealSubtext}>{form.name}'s Longevity Score™</Text>
-            <Text style={[s.revealScore, { color: scoreColor }]}>{displayScore}</Text>
-            <Text style={[s.revealLabel, { color: scoreColor }]}>{label}</Text>
-            <Text style={s.revealExplain}>
-              Starting point only. Log meals, care events, and BioCards to raise the factors you can control.
-            </Text>
-
-            {displayBreakdown.length > 0 && (
-              <View style={s.factorCard}>
-                <Text style={s.factorCardTitle}>What's driving this score</Text>
-                {displayBreakdown.map((f) => (
-                  <View key={f.factor} style={s.factorRow}>
-                    <View style={s.factorRowTop}>
-                      <Text style={s.factorName}>{f.label}</Text>
-                      <Text style={s.factorVal}>{f.score}</Text>
-                    </View>
-                    <View style={s.factorBarTrack}>
-                      <View
-                        style={[
-                          s.factorBarFill,
-                          {
-                            width: `${f.score}%`,
-                            backgroundColor:
-                              f.score >= 70
-                                ? theme.colors.success
-                                : f.score >= 40
-                                  ? theme.colors.warning
-                                  : theme.colors.danger,
-                          },
-                        ]}
-                      />
-                    </View>
-                    {f.suggestion ? (
-                      <Text style={s.factorHint}>{f.suggestion}</Text>
-                    ) : null}
-                  </View>
-                ))}
-              </View>
-            )}
-
-            <Pressable style={s.startBtn} onPress={() => router.replace("/(tabs)")}>
-              <Text style={s.startBtnText}>Start {form.name}'s Journey</Text>
-            </Pressable>
-          </ScrollView>
-        );
-      }
-    }
+  const back = () => {
+    const i = STEPS.indexOf(step);
+    setError(null);
+    if (i > 0) setStep(STEPS[i - 1]);
+    else if (router.canGoBack()) router.back();
+    else router.replace("/");
   };
 
-  const steps: Step[] = ["species", "breed", "basics", "conditions"];
-  const currentIndex = steps.indexOf(step);
-  const progress = step === "computing" || step === "reveal" ? 1 : (currentIndex + 1) / steps.length;
-
-  return (
-    <View style={s.container}>
-      {step !== "computing" && step !== "reveal" && (
-        <View style={s.progressBar}>
-          <View style={[s.progressFill, { width: `${progress * 100}%` }]} />
+  if (step === "reveal" && result) {
+    const { pet, score } = result;
+    const food = pet.primaryFoodId ? byId.get(pet.primaryFoodId) : undefined;
+    const grade = food ? rateFood(food, petContext(pet)).fit?.grade : undefined;
+    return (
+      <Screen width={640}>
+        <Text style={s.kicker}>{pet.name}'s Longevity Score</Text>
+        <View style={{ marginVertical: 12 }}>
+          <ScoreNumber score={score.score} size={104} />
         </View>
-      )}
+        <Text style={s.revealNote}>
+          A starting point from breed, age, body condition{food ? ", food" : ""} and activity.{" "}
+          {Math.round(score.dataCompleteness * 100)}% of it rests on data you gave; the rest is neutral until you add meals
+          and care records.
+        </Text>
 
-      {step !== "species" && step !== "computing" && step !== "reveal" && (
-        <Pressable
-          style={s.backBtn}
-          onPress={() => {
-            const idx = steps.indexOf(step);
-            if (idx > 0) setStep(steps[idx - 1]);
-          }}
-        >
-          <Text style={s.backText}>← Back</Text>
-        </Pressable>
-      )}
+        <View style={s.revealActions}>
+          <Button title="Go to dashboard" variant="accent" onPress={() => router.replace("/(tabs)")} />
+          <Button title={sharing ? "Hide share card" : "Share this Score"} variant="secondary" onPress={() => setSharing(!sharing)} />
+        </View>
 
-      {renderStep()}
-    </View>
+        {sharing ? (
+          <Card style={{ marginTop: 16 }}>
+            <SharePanel card={buildShareCard(pet, score, grade)} />
+          </Card>
+        ) : null}
+
+        {guest && isSupabaseConfigured ? (
+          <Card style={{ marginTop: 16 }}>
+            <Text style={s.cardTitle}>Keep this Score</Text>
+            <Text style={s.cardBody}>
+              Right now {pet.name}'s profile lives only in this browser. A free account saves it and its history.
+            </Text>
+            <Button title="Create free account" onPress={() => router.push("/(auth)/login")} style={{ marginTop: 12 }} />
+          </Card>
+        ) : null}
+
+        <Card style={{ marginTop: 16 }}>
+          <Text style={s.cardTitle}>What is driving the Score</Text>
+          <Text style={s.cardBody}>Open any factor to see how it is calculated and the research behind it.</Text>
+          <View style={{ marginTop: 8 }}>
+            <FactorList breakdown={score.breakdown} />
+          </View>
+        </Card>
+        <Text style={s.disclaimer}>{SCORE_DISCLAIMER}</Text>
+      </Screen>
+    );
+  }
+
+  const index = STEPS.indexOf(step);
+  return (
+    <Screen width={560}>
+      <View style={s.top}>
+        <LinkText onPress={back}>← Back</LinkText>
+        <Text style={s.stepCount}>
+          Step {index + 1} of {STEPS.length}
+        </Text>
+      </View>
+      <View style={s.progress} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: STEPS.length, now: index + 1 }}>
+        <View style={[s.progressFill, { width: `${((index + 1) / STEPS.length) * 100}%` }]} />
+      </View>
+
+      {step === "species" ? (
+        <View>
+          <Text accessibilityRole="header" style={s.title}>
+            Who are we scoring?
+          </Text>
+          <View style={s.speciesRow}>
+            {(["DOG", "CAT"] as const).map((sp) => (
+              <Pressable
+                key={sp}
+                accessibilityRole="button"
+                onPress={() => {
+                  setSpecies(sp);
+                  setBreed("");
+                  setFoodId(null);
+                  setStep("breed");
+                }}
+                style={({ hovered, focused }: any) => [s.speciesCard, (hovered || focused || species === sp) && s.speciesCardOn]}
+              >
+                <Text style={s.speciesEmoji}>{sp === "DOG" ? "🐕" : "🐈"}</Text>
+                <Text style={s.speciesLabel}>{sp === "DOG" ? "Dog" : "Cat"}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {step === "breed" && species ? (
+        <View>
+          <Text accessibilityRole="header" style={s.title}>
+            What breed?
+          </Text>
+          <Text style={s.sub}>Breed sets the life-expectancy baseline. Choose Mixed Breed if unsure.</Text>
+          <Field label="Search breeds" value={breedQuery} onChangeText={setBreedQuery} placeholder="Start typing" autoCapitalize="words" />
+          <ScrollView style={s.breedList}>
+            {breedsFor(species)
+              .filter((b) => b.name.toLowerCase().includes(breedQuery.trim().toLowerCase()))
+              .map((b) => (
+                <Pressable
+                  key={b.name}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    setBreed(b.name);
+                    setStep("basics");
+                  }}
+                  style={({ hovered, focused }: any) => [s.breedItem, (hovered || focused || breed === b.name) && s.breedItemOn]}
+                >
+                  <Text style={s.breedName}>{b.name}</Text>
+                  <Text style={s.breedMeta}>about {b.lifespanYears.toFixed(1)} yrs</Text>
+                </Pressable>
+              ))}
+          </ScrollView>
+          <Text style={s.hint}>Breed not listed? Choose Mixed Breed for now. More breeds are being added.</Text>
+        </View>
+      ) : null}
+
+      {step === "basics" ? (
+        <View>
+          <Text accessibilityRole="header" style={s.title}>
+            About {name.trim() || "your pet"}
+          </Text>
+          <Field label="Name" value={name} onChangeText={setName} placeholder="Luna" maxLength={40} autoCapitalize="words" />
+          <Field label="Age in years" value={age} onChangeText={setAge} placeholder="3" inputMode="decimal" hint="Use a decimal for young pets: 0.5 is six months." />
+          <View style={s.inline}>
+            <View style={{ flex: 1 }}>
+              <Field label={`Weight (${unit})`} value={weight} onChangeText={setWeight} placeholder={unit === "lb" ? "55" : "25"} inputMode="decimal" />
+            </View>
+            <View style={{ width: 130 }}>
+              <Segmented label="Unit" value={unit} onChange={setUnit} options={[{ value: "lb", label: "lb" }, { value: "kg", label: "kg" }]} />
+            </View>
+          </View>
+          <Segmented label="Sex" value={sex} onChange={setSex} options={[{ value: "FEMALE", label: "Female" }, { value: "MALE", label: "Male" }]} />
+          <Segmented label="Spayed or neutered" value={neutered} onChange={setNeutered} options={[{ value: true, label: "Yes" }, { value: false, label: "No" }]} />
+          <Segmented
+            label="Body condition (1–9)"
+            value={bcs}
+            onChange={setBcs}
+            options={[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({ value: n, label: String(n) }))}
+          />
+          <Notice level={bcs >= 4 && bcs <= 5 ? "good" : "info"}>{BCS_TEXT[bcs]}</Notice>
+          <Text style={s.hint}>Run your hands along the ribs and look down from above. Your vet can confirm the score.</Text>
+          {error ? <Notice level="warning">{error}</Notice> : null}
+          <Button title="Continue" onPress={() => validateBasics() && setStep("lifestyle")} style={{ marginTop: 12 }} />
+        </View>
+      ) : null}
+
+      {step === "lifestyle" ? (
+        <View>
+          <Text accessibilityRole="header" style={s.title}>
+            Food and exercise
+          </Text>
+          <Segmented label={`Active minutes on a typical day (walks, play, running)`} value={activity} onChange={setActivity} options={ACTIVITY} wrap />
+
+          <Text style={s.fieldLabel}>What does {name.trim() || "your pet"} eat most days?</Text>
+          <Text style={s.hint}>
+            Nutrition is the largest part of the Score. The products below are samples for now; if yours is not here, skip
+            this and type in its label afterwards.
+          </Text>
+          <View style={{ marginTop: 10 }}>
+            {foodChoices.map(({ food, rating }) => (
+              <FoodRow
+                key={food.id}
+                food={food}
+                rating={rating}
+                showFit
+                onPress={() => setFoodId(foodId === food.id ? null : food.id)}
+                right={<Text style={[s.pick, foodId === food.id && { color: c.success }]}>{foodId === food.id ? "✓ Selected" : "Select"}</Text>}
+              />
+            ))}
+          </View>
+          {error ? <Notice level="warning">{error}</Notice> : null}
+          <Button
+            title={foodId ? "See the Score" : "Skip food and see the Score"}
+            variant="accent"
+            loading={createPet.isPending}
+            onPress={finish}
+            style={{ marginTop: 12 }}
+          />
+        </View>
+      ) : null}
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background, paddingTop: 60 },
-  progressBar: {
-    height: 3,
-    backgroundColor: theme.colors.surfaceBorder,
-    marginHorizontal: 20,
-    borderRadius: 1.5,
-    overflow: "hidden",
-  },
-  progressFill: { height: "100%", backgroundColor: theme.colors.success, borderRadius: 1.5 },
-  backBtn: { paddingHorizontal: 20, paddingVertical: 12 },
-  backText: { fontSize: 14, color: theme.colors.textSecondary },
-
-  stepContent: { flex: 1, paddingHorizontal: 24, paddingTop: 20 },
-  stepTitle: { fontSize: 24, fontWeight: "700", color: theme.colors.textPrimary, marginBottom: 6 },
-  stepSubtitle: { fontSize: 14, color: theme.colors.textSecondary, lineHeight: 20, marginBottom: 24 },
-
-  choiceRow: { flexDirection: "row", gap: 16 },
-  choiceCard: {
-    flex: 1,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: theme.colors.surfaceBorder,
-    padding: 32,
-    alignItems: "center",
-  },
-  choiceCardActive: { borderColor: theme.colors.success, backgroundColor: `${theme.colors.success}10` },
-  choiceEmoji: { fontSize: 56, marginBottom: 12 },
-  choiceLabel: { fontSize: 16, fontWeight: "600", color: theme.colors.textPrimary },
-
-  breedList: { flex: 1 },
-  breedItem: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.colors.surfaceBorder },
-  breedItemActive: { backgroundColor: `${theme.colors.success}10` },
-  breedText: { fontSize: 15, color: theme.colors.textSecondary },
-  breedTextActive: { color: theme.colors.textPrimary, fontWeight: "600" },
-
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: theme.colors.textTertiary,
-    marginTop: 16,
-    marginBottom: 6,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  input: {
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.surfaceBorder,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 15,
-    color: theme.colors.textPrimary,
-  },
-
-  choiceRowSmall: { flexDirection: "row", gap: 8 },
-  choiceSmall: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: theme.colors.surfaceBorder,
-    alignItems: "center",
-  },
-  choiceSmallActive: { borderColor: theme.colors.success, backgroundColor: `${theme.colors.success}10` },
-  choiceSmallText: { fontSize: 14, fontWeight: "500", color: theme.colors.textTertiary },
-
-  bcsRow: { flexDirection: "row", gap: 4 },
-  bcsBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: theme.colors.surfaceBorder,
-    alignItems: "center",
-  },
-  bcsBtnActive: { borderColor: theme.colors.success, backgroundColor: `${theme.colors.success}10` },
-  bcsBtnText: { fontSize: 14, fontWeight: "600", color: theme.colors.textTertiary },
-  bcsHint: { fontSize: 11, color: theme.colors.textTertiary, marginTop: 6 },
-
-  nextBtn: {
-    backgroundColor: theme.colors.textPrimary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: "center",
-    marginTop: 24,
-    marginBottom: 40,
-  },
-  nextBtnDisabled: { opacity: 0.3 },
-  nextBtnText: { fontSize: 15, fontWeight: "600", color: theme.colors.background },
-
-  summaryCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
-    padding: 20,
-    gap: 6,
-    marginBottom: 24,
-  },
-  summaryLine: { fontSize: 14, color: theme.colors.textSecondary },
-
-  revealBtn: {
-    backgroundColor: theme.colors.success,
-    borderRadius: 14,
-    paddingVertical: 18,
-    alignItems: "center",
-  },
-  revealBtnText: { fontSize: 16, fontWeight: "700", color: "#000" },
-
-  computingTitle: { fontSize: 22, fontWeight: "700", color: theme.colors.textPrimary, marginBottom: 8 },
-  computingSub: {
-    fontSize: 13,
-    color: theme.colors.textSecondary,
-    textAlign: "center",
-    maxWidth: 280,
-    lineHeight: 20,
-  },
-  computingPreview: {
-    marginTop: 20,
-    fontSize: 13,
-    color: theme.colors.textTertiary,
-    fontVariant: ["tabular-nums"],
-  },
-
-  revealSubtext: { fontSize: 14, color: theme.colors.textSecondary, marginBottom: 16, marginTop: 12 },
-  revealScore: { fontSize: 96, fontWeight: "700", lineHeight: 100 },
-  revealLabel: { fontSize: 20, fontWeight: "600", marginTop: 4, marginBottom: 16 },
-  revealExplain: {
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    textAlign: "center",
-    maxWidth: 300,
-    lineHeight: 22,
-    marginBottom: 24,
-  },
-
-  factorCard: {
-    width: "100%",
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: theme.colors.surfaceBorder,
-    padding: 16,
-    marginBottom: 28,
-  },
-  factorCardTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: theme.colors.textSecondary,
-    marginBottom: 12,
-  },
-  factorRow: { marginBottom: 12 },
-  factorRowTop: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
-  factorName: { fontSize: 12, color: theme.colors.textSecondary },
-  factorVal: { fontSize: 12, fontWeight: "600", color: theme.colors.textPrimary },
-  factorBarTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: `${theme.colors.textTertiary}33`,
-    overflow: "hidden",
-  },
-  factorBarFill: { height: "100%", borderRadius: 2 },
-  factorHint: { fontSize: 11, color: theme.colors.textTertiary, marginTop: 4, lineHeight: 15 },
-
-  startBtn: {
-    backgroundColor: theme.colors.textPrimary,
-    borderRadius: 14,
-    paddingHorizontal: 40,
-    paddingVertical: 18,
-  },
-  startBtnText: { fontSize: 16, fontWeight: "700", color: theme.colors.background },
+  top: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  stepCount: { fontSize: 13, color: c.textTertiary },
+  progress: { height: 4, borderRadius: 2, backgroundColor: c.surfaceBorder, overflow: "hidden", marginBottom: 28 },
+  progressFill: { height: "100%", backgroundColor: c.success },
+  title: { fontSize: 28, fontWeight: "800", color: c.textPrimary, marginBottom: 8, letterSpacing: -0.3 },
+  sub: { fontSize: 15, lineHeight: 22, color: c.textSecondary, marginBottom: 20 },
+  hint: { fontSize: 13, lineHeight: 19, color: c.textTertiary, marginTop: 4 },
+  fieldLabel: { fontSize: 13, fontWeight: "600", color: c.textSecondary, marginTop: 8, marginBottom: 2 },
+  speciesRow: { flexDirection: "row", gap: 16, marginTop: 16 },
+  speciesCard: { flex: 1, alignItems: "center", paddingVertical: 36, borderRadius: 20, borderWidth: 2, borderColor: c.surfaceBorder, backgroundColor: c.surface },
+  speciesCardOn: { borderColor: c.success, backgroundColor: `${c.success}14` },
+  speciesEmoji: { fontSize: 56 },
+  speciesLabel: { fontSize: 17, fontWeight: "700", color: c.textPrimary, marginTop: 10 },
+  breedList: { maxHeight: 420, borderWidth: 1, borderColor: c.surfaceBorder, borderRadius: 12 },
+  breedItem: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 14, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: c.surfaceBorder },
+  breedItemOn: { backgroundColor: c.surfaceHover },
+  breedName: { fontSize: 15, fontWeight: "600", color: c.textPrimary },
+  breedMeta: { fontSize: 12, color: c.textTertiary },
+  inline: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
+  pick: { fontSize: 13, fontWeight: "700", color: c.textSecondary },
+  kicker: { fontSize: 15, fontWeight: "600", color: c.textSecondary, textAlign: "center", marginTop: 16 },
+  revealNote: { fontSize: 15, lineHeight: 23, color: c.textSecondary, textAlign: "center", maxWidth: 480, alignSelf: "center" },
+  revealActions: { flexDirection: "row", flexWrap: "wrap", gap: 12, justifyContent: "center", marginTop: 20 },
+  cardTitle: { fontSize: 16, fontWeight: "700", color: c.textPrimary },
+  cardBody: { fontSize: 14, lineHeight: 21, color: c.textSecondary, marginTop: 4 },
+  disclaimer: { fontSize: 12, lineHeight: 18, color: c.textTertiary, marginTop: 20, textAlign: "center" },
 });

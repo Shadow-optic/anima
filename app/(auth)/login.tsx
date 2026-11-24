@@ -1,201 +1,139 @@
 /**
- * ANIMA Auth Screens
- * Login / Signup with Supabase Auth
+ * Sign in / create account (Supabase email + password).
  */
 
-import {useState} from "react";
-import {Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View} from "react-native";
-import {Stack, useRouter} from "expo-router";
-import {isMockMode, supabase} from "@/config/api";
-import {theme} from "@/config/theme";
-import {useAuthStore} from "@/stores";
+import { useEffect, useState } from "react";
+import { Platform, StyleSheet, Text, View } from "react-native";
+import { useRouter } from "expo-router";
+import { isSupabaseConfigured, supabase } from "@/config/supabase";
+import { theme } from "@/config/theme";
+import { Button, Card, Field, LinkText, Notice, Screen } from "@/components/ui";
+import { useAuthStore } from "@/stores";
+
+const c = theme.colors;
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { setUser } = useAuthStore();
-  const [isSignUp, setIsSignUp] = useState(false);
+  const status = useAuthStore((s) => s.status);
+  const [mode, setMode] = useState<"signin" | "signup">("signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
-  const handleAuth = async () => {
-    if (!email || !password) {
-      Alert.alert("Missing Fields", "Please enter email and password.");
-      return;
-    }
+  useEffect(() => {
+    if (status === "account") router.replace("/");
+  }, [status]);
 
-    if (isMockMode) {
-      setUser({
-        id: "demo-user",
-        email: email || "demo@anima.local",
-        name: name || "Demo User",
-        tier: "PRO",
-      });
-      router.replace("/(tabs)");
-      return;
-    }
+  if (!isSupabaseConfigured || !supabase) {
+    return (
+      <Screen width={440}>
+        <Text style={s.logo}>ANIMA</Text>
+        <Notice level="info">
+          Accounts are not switched on for this site yet. Everything you do is saved in this browser, so you can carry on
+          without one.
+        </Notice>
+        <Button title="Continue" onPress={() => router.replace("/")} />
+      </Screen>
+    );
+  }
 
-    setLoading(true);
-
+  const submit = async () => {
+    setError(null);
+    setInfo(null);
+    const address = email.trim();
+    if (!/^\S+@\S+\.\S+$/.test(address)) return setError("Enter a valid email address.");
+    if (password.length < 8) return setError("Use a password of at least 8 characters.");
+    setBusy(true);
     try {
-      if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
-          email,
+      if (mode === "signup") {
+        const { data, error } = await supabase!.auth.signUp({
+          email: address,
           password,
-          options: { data: { name } },
+          options: { emailRedirectTo: Platform.OS === "web" ? window.location.origin : undefined },
         });
         if (error) throw error;
-        Alert.alert("Check Your Email", "We sent a confirmation link. Verify to continue.");
+        if (!data.session) setInfo("Check your inbox and confirm your email to finish creating the account.");
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase!.auth.signInWithPassword({ email: address, password });
         if (error) throw error;
-        // Auth state listener in _layout.tsx handles navigation
       }
-    } catch (error: any) {
-      Alert.alert("Auth Error", error.message || "Something went wrong.");
+    } catch (e: any) {
+      setError(e?.message ?? "Something went wrong. Try again.");
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
-  const handleSocialAuth = async (provider: "google" | "apple") => {
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({ provider });
-      if (error) throw error;
-    } catch (error: any) {
-      Alert.alert("Error", error.message);
-    }
+  const reset = async () => {
+    setError(null);
+    const address = email.trim();
+    if (!/^\S+@\S+\.\S+$/.test(address)) return setError("Enter your email address first.");
+    const { error } = await supabase!.auth.resetPasswordForEmail(address, {
+      redirectTo: Platform.OS === "web" ? window.location.origin : undefined,
+    });
+    if (error) setError(error.message);
+    else setInfo("If that address has an account, a reset link is on its way.");
   };
 
   return (
-    <>
-      <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView
-        style={s.container}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
-        <View style={s.inner}>
-          {/* Logo area */}
-          <View style={s.logoArea}>
-            <Text style={s.logoMark}>🧬</Text>
-            <Text style={s.logoText}>ANIMA</Text>
-            <Text style={s.tagline}>Pet Longevity Intelligence</Text>
+    <Screen width={440}>
+      <Text style={s.logo}>ANIMA</Text>
+      <Text accessibilityRole="header" style={s.title}>
+        {mode === "signup" ? "Create your account" : "Welcome back"}
+      </Text>
+      <Text style={s.sub}>
+        {mode === "signup"
+          ? "Save your pet's Score and history, and pick up on any device. Anything you have already entered comes with you."
+          : "Sign in to see your pets and their history."}
+      </Text>
+
+      <Card style={{ marginTop: 20 }}>
+        <Field
+          label="Email"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoComplete="email"
+          keyboardType="email-address"
+          inputMode="email"
+        />
+        <Field
+          label="Password"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          autoComplete={mode === "signup" ? "new-password" : "current-password"}
+          hint={mode === "signup" ? "At least 8 characters." : undefined}
+          onSubmitEditing={submit}
+        />
+        {error ? <Notice level="warning">{error}</Notice> : null}
+        {info ? <Notice level="good">{info}</Notice> : null}
+        <Button title={mode === "signup" ? "Create account" : "Sign in"} onPress={submit} loading={busy} variant="accent" />
+        {mode === "signin" ? (
+          <View style={{ alignItems: "center", marginTop: 14 }}>
+            <LinkText onPress={reset}>Forgot password?</LinkText>
           </View>
+        ) : null}
+      </Card>
 
-          {/* Form */}
-          <View style={s.form}>
-            {isSignUp && (
-              <TextInput
-                style={s.input}
-                placeholder="Your name"
-                placeholderTextColor={theme.colors.textTertiary}
-                value={name}
-                onChangeText={setName}
-                autoCapitalize="words"
-              />
-            )}
-
-            <TextInput
-              style={s.input}
-              placeholder="Email"
-              placeholderTextColor={theme.colors.textTertiary}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              textContentType="emailAddress"
-            />
-
-            <TextInput
-              style={s.input}
-              placeholder="Password"
-              placeholderTextColor={theme.colors.textTertiary}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              textContentType={isSignUp ? "newPassword" : "password"}
-            />
-
-            <Pressable
-              style={[s.primaryBtn, loading && s.primaryBtnDisabled]}
-              onPress={handleAuth}
-              disabled={loading}
-            >
-              <Text style={s.primaryBtnText}>
-                {loading ? "Loading..." : isMockMode ? "Continue in Demo Mode" : isSignUp ? "Create Account" : "Sign In"}
-              </Text>
-            </Pressable>
-
-            {/* Divider */}
-            {!isMockMode && (
-              <View style={s.divider}>
-                <View style={s.dividerLine} />
-                <Text style={s.dividerText}>or continue with</Text>
-                <View style={s.dividerLine} />
-              </View>
-            )}
-
-            {/* Social auth */}
-            {!isMockMode && (
-              <View style={s.socialRow}>
-                {Platform.OS === "ios" && (
-                  <Pressable style={s.socialBtn} onPress={() => handleSocialAuth("apple")}>
-                    <Text style={s.socialBtnText}>Apple</Text>
-                  </Pressable>
-                )}
-                <Pressable style={s.socialBtn} onPress={() => handleSocialAuth("google")}>
-                  <Text style={s.socialBtnText}>Google</Text>
-                </Pressable>
-              </View>
-            )}
-
-            {/* Toggle */}
-            {!isMockMode && (
-              <Pressable style={s.toggleBtn} onPress={() => setIsSignUp(!isSignUp)}>
-                <Text style={s.toggleText}>
-                  {isSignUp ? "Already have an account? " : "Don't have an account? "}
-                  <Text style={s.toggleLink}>{isSignUp ? "Sign In" : "Sign Up"}</Text>
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        </View>
-      </KeyboardAvoidingView>
-    </>
+      <View style={s.switch}>
+        <Text style={s.sub}>{mode === "signup" ? "Already have an account?" : "New here?"}</Text>
+        <LinkText onPress={() => setMode(mode === "signup" ? "signin" : "signup")}>
+          {mode === "signup" ? "Sign in" : "Create an account"}
+        </LinkText>
+      </View>
+      <View style={{ alignItems: "center", marginTop: 16 }}>
+        <LinkText onPress={() => router.replace("/")}>Continue without an account</LinkText>
+      </View>
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  inner: { flex: 1, justifyContent: "center", paddingHorizontal: 32 },
-
-  logoArea: { alignItems: "center", marginBottom: 48 },
-  logoMark: { fontSize: 48, marginBottom: 8 },
-  logoText: { fontSize: 32, fontWeight: "700", color: theme.colors.textPrimary, letterSpacing: 4 },
-  tagline: { fontSize: 13, color: theme.colors.textTertiary, marginTop: 4, letterSpacing: 0.5 },
-
-  form: { gap: 12 },
-  input: {
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1, borderColor: theme.colors.surfaceBorder,
-    borderRadius: 12, padding: 16,
-    fontSize: 15, color: theme.colors.textPrimary,
-  },
-
-  primaryBtn: { backgroundColor: theme.colors.textPrimary, borderRadius: 12, paddingVertical: 16, alignItems: "center", marginTop: 4 },
-  primaryBtnDisabled: { opacity: 0.5 },
-  primaryBtnText: { fontSize: 15, fontWeight: "600", color: theme.colors.background },
-
-  divider: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 8 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: theme.colors.surfaceBorder },
-  dividerText: { fontSize: 12, color: theme.colors.textTertiary },
-
-  socialRow: { flexDirection: "row", gap: 10 },
-  socialBtn: { flex: 1, borderWidth: 1, borderColor: theme.colors.surfaceBorder, borderRadius: 12, paddingVertical: 14, alignItems: "center" },
-  socialBtnText: { fontSize: 14, fontWeight: "500", color: theme.colors.textSecondary },
-
-  toggleBtn: { alignItems: "center", marginTop: 8 },
-  toggleText: { fontSize: 13, color: theme.colors.textTertiary },
-  toggleLink: { color: theme.colors.textPrimary, fontWeight: "600" },
+  logo: { fontSize: 18, fontWeight: "800", letterSpacing: 4, color: c.textPrimary, marginBottom: 32, marginTop: 24 },
+  title: { fontSize: 28, fontWeight: "800", color: c.textPrimary },
+  sub: { fontSize: 15, lineHeight: 22, color: c.textSecondary, marginTop: 6 },
+  switch: { flexDirection: "row", gap: 8, justifyContent: "center", alignItems: "baseline", marginTop: 20 },
 });
