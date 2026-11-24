@@ -7,6 +7,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { theme } from "@/config/theme";
 import { Bar, Button, Card, Field, GradeBadge, LinkText, Loading, Notice, PageHeader, Screen, SectionTitle, Segmented, confirmAction } from "@/components/ui";
+import { AutopilotCard } from "@/components/Autopilot";
 import { foodTitle } from "@/components/food";
 import { useActivePet, useDeleteMeal, useFoods, useLogMeal, useMeals, usePetScore } from "@/hooks/useData";
 import { caloriesForGrams, dailyPortionGrams, rateFood } from "@/shared/food/rating";
@@ -42,7 +43,8 @@ export default function Nutrition() {
   const todayKcal = meals.filter((m) => m.loggedAt.slice(0, 10) === today).reduce((sum, m) => sum + m.totalCalories, 0);
   const target = diet.dailyCalorieTarget;
   const portion = mainFood ? dailyPortionGrams(mainFood, target) : 0;
-  const defaultGrams = portion ? Math.round(portion / 2) : 0;
+  // Half the day's food, after setting aside the 10% treat budget.
+  const defaultGrams = portion ? Math.round((portion * 0.9) / 2) : 0;
   const gramsNum = grams ? parseFloat(grams) : defaultGrams;
   const treat = treatId ? byId.get(treatId) : treats[0];
   const count = Math.max(1, Math.min(50, parseInt(treatCount, 10) || 1));
@@ -73,28 +75,22 @@ export default function Nutrition() {
   };
 
   const ratio = target > 0 ? todayKcal / target : 0;
-  const treatAllowance = Math.round(target * 0.1);
 
   return (
     <Screen>
       <PageHeader title="Nutrition" subtitle={`What ${pet.name} eats is 25% of the Longevity Score.`} />
 
+      <AutopilotCard pet={pet} meals={meals} food={mainFood} />
+
+      <SectionTitle>Today</SectionTitle>
       <Card>
-        <View style={s.targetRow}>
-          <View>
-            <Text style={s.big}>
-              {todayKcal} <Text style={s.bigOf}>/ {target} kcal</Text>
-            </Text>
-            <Text style={s.meta}>logged today against the daily target</Text>
-          </View>
-        </View>
+        <Text style={s.big}>
+          {todayKcal} <Text style={s.bigOf}>/ {target} kcal</Text>
+        </Text>
+        <Text style={s.meta}>logged today against the plan</Text>
         <View style={{ marginTop: 12 }}>
           <Bar value={Math.min(100, ratio * 100)} color={ratio > 1.1 ? c.warning : c.success} />
         </View>
-        <Text style={s.meta}>
-          The target is a starting point from {pet.name}'s weight, life stage and body condition. Individual needs vary, so
-          adjust it against body condition. Treat allowance: {treatAllowance} kcal a day.
-        </Text>
       </Card>
 
       <SectionTitle>This week</SectionTitle>
@@ -115,7 +111,7 @@ export default function Nutrition() {
             <GradeBadge grade={rateFood(mainFood, ctx).fit?.grade ?? "C"} size={40} />
             <View style={{ flex: 1 }}>
               <Text style={s.foodName}>{foodTitle(mainFood)}</Text>
-              <Text style={s.meta}>About {portion} g a day meets the target.</Text>
+              <Text style={s.meta}>About {Math.round(portion * 0.9)} g a day, with 10% of calories left for treats.</Text>
             </View>
           </View>
           <View style={s.logRow}>

@@ -7,7 +7,7 @@ import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { theme } from "@/config/theme";
 import { Badge, Button, Card, Field, LinkText, Loading, Notice, PageHeader, Screen, SectionTitle, Segmented, confirmAction } from "@/components/ui";
-import { useActivePet, useAddCare, useCare, useDeleteCare, useUpdatePet } from "@/hooks/useData";
+import { useActivePet, useAddCare, useAddWeighIn, useCare, useDeleteCare, useUpdatePet } from "@/hooks/useData";
 import { summariseCare, petContext } from "@/shared/score/longevity";
 import type { CareKind } from "@/shared/types";
 import { BCS_TEXT } from "../onboarding";
@@ -37,6 +37,7 @@ export default function Care() {
   const addCare = useAddCare();
   const deleteCare = useDeleteCare();
   const updatePet = useUpdatePet();
+  const addWeighIn = useAddWeighIn();
   const [dates, setDates] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [weight, setWeight] = useState("");
@@ -65,7 +66,10 @@ export default function Care() {
       setSaved("Enter a weight in kg.");
       return;
     }
-    updatePet.mutate({ id: pet.id, patch: { weightKg: Math.round(kg * 10) / 10 } }, { onSuccess: () => { setSaved("Weight updated."); setWeight(""); } });
+    addWeighIn.mutate(
+      { petId: pet.id, date: isoToday(), weightKg: Math.round(kg * 10) / 10 },
+      { onSuccess: () => { setSaved("Weigh-in recorded. Portion Autopilot uses it on the Nutrition tab."); setWeight(""); } }
+    );
   };
 
   return (
@@ -117,9 +121,9 @@ export default function Care() {
         <Notice level={pet.bodyCondition >= 4 && pet.bodyCondition <= 5 ? "good" : "info"}>{BCS_TEXT[pet.bodyCondition]}</Notice>
         <View style={s.recordRow}>
           <View style={{ flex: 1 }}>
-            <Field label={`Weight in kg (now ${pet.weightKg})`} value={weight} onChangeText={setWeight} inputMode="decimal" placeholder={String(pet.weightKg)} />
+            <Field label={`Weigh-in today, kg (last ${pet.weightKg})`} value={weight} onChangeText={setWeight} inputMode="decimal" placeholder={String(pet.weightKg)} />
           </View>
-          <Button title="Update" variant="secondary" onPress={saveWeight} loading={updatePet.isPending} style={{ marginTop: 22 }} />
+          <Button title="Record" variant="secondary" onPress={saveWeight} loading={addWeighIn.isPending} style={{ marginTop: 22 }} />
         </View>
         {saved ? <Text accessibilityLiveRegion="polite" style={s.meta}>{saved}</Text> : null}
       </Card>

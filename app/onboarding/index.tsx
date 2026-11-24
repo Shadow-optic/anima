@@ -89,6 +89,8 @@ export default function Onboarding() {
       bodyCondition: bcs,
       activityMinutesPerDay: activity,
       primaryFoodId: foodId,
+      calorieFactor: 1,
+      planReviewedAt: null,
     };
   }, [species, breed, name, ageNum, weightKg, sex, neutered, bcs, activity, foodId]);
 
@@ -290,8 +292,8 @@ export default function Onboarding() {
 
           <Text style={s.fieldLabel}>What does {name.trim() || "your pet"} eat most days?</Text>
           <Text style={s.hint}>
-            Nutrition is the largest part of the Score. The products below are samples for now; if yours is not here, skip
-            this and type in its label afterwards.
+            Nutrition is the largest part of the Score. If yours is not listed, skip this and type in its label
+            afterwards.
           </Text>
           <View style={{ marginTop: 10 }}>
             {foodChoices.map(({ food, rating }) => (

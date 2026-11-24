@@ -55,7 +55,7 @@ export const NUTRITION_WEIGHTS = { foodQuality: 0.55, calorieFit: 0.2, consisten
 export type ScorePet = Pick<
   Pet,
   "species" | "breed" | "dateOfBirth" | "weightKg" | "bodyCondition" | "activityMinutesPerDay" | "neutered"
->;
+> & { calorieFactor?: number };
 
 export interface DietSummary {
   /** 0–100 Food Score (fit for this pet) of what the pet eats, weighted by calories. null = unknown. */
@@ -126,7 +126,8 @@ export function summariseDiet(
   now: number = Date.now()
 ): DietSummary {
   const ctx = petContext(pet, now);
-  const target = dailyCalorieTarget(pet, ctx.stage);
+  // The textbook target, scaled by what Portion Autopilot has learned about this pet.
+  const target = Math.round(dailyCalorieTarget(pet, ctx.stage) * (pet.calorieFactor ?? 1));
   const recent = meals.filter((m) => {
     const t = new Date(m.loggedAt).getTime();
     return t <= now && now - t <= 7 * DAY_MS;

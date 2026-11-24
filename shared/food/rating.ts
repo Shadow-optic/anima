@@ -118,10 +118,10 @@ const PROTEIN_FULL_MARKS: Record<Species, number> = { DOG: 28, CAT: 40 };
 
 const NAMED_ANIMAL =
   /\b(chicken|turkey|duck|beef|lamb|pork|venison|bison|rabbit|salmon|trout|whitefish|herring|menhaden|sardine|tuna|cod|pollock|mackerel|egg)\b/i;
-const UNNAMED_ANIMAL = /\b(meat|animal|poultry)\b.*\b(by-?products?|meal|digest|fat|tallow)\b/i;
-const ARTIFICIAL_COLOR = /\b(red\s*(40|3)|yellow\s*(5|6)|blue\s*(1|2)|titanium dioxide|artificial colou?rs?|caramel colou?r)\b/i;
+const UNNAMED_ANIMAL = /\b(meat|animal)\b.*\b(by-?products?|meal|digest|fat|tallow|liver)\b/i;
+const ARTIFICIAL_COLOR = /\b(red\s*#?\s*(40|3)|yellow\s*#?\s*(5|6)|blue\s*#?\s*(1|2)|titanium dioxide|artificial colou?rs?|added colou?rs?|caramel colou?r)\b/i;
 const SYNTHETIC_PRESERVATIVE = /\b(bha|bht|ethoxyquin|tbhq|propyl gallate)\b/i;
-const ADDED_SUGAR = /\b(sugar|corn syrup|sucrose|fructose|dextrose|molasses|cane syrup)\b/i;
+const ADDED_SUGAR = /\b(sugar|corn syrup|maple syrup|sucrose|fructose|dextrose|molasses|cane syrup)\b/i;
 const PULSE_OR_POTATO = /\b(peas?|pea (protein|flour|starch|fib(er|re))|lentils?|chickpeas?|garbanzo|fava|beans?|potato(es)?|sweet potato(es)?)\b/i;
 const ALLIUM = /\b(onion|garlic)\b/i;
 const OMEGA3_SOURCE = /\b(fish oil|salmon oil|menhaden oil|anchovy oil|krill|algae|algal|flaxseed|linseed)\b/i;
@@ -199,9 +199,9 @@ function scoreAdequacy(food: FoodProduct, flags: RatingFlag[]): RatingComponent 
     earned = 24;
     notes.push("Complete and balanced, formulated to meet AAFCO nutrient profiles (not feeding-trial tested).");
   } else {
-    earned = 9;
-    notes.push("Adequacy statement not provided. Check the label for an AAFCO statement.");
-    flags.push({ level: "caution", text: "No adequacy statement on record. Confirm the label says complete and balanced." });
+    earned = 15;
+    notes.push("The AAFCO adequacy statement is not on record for this food, so half credit. It is printed on the pack.");
+    flags.push({ level: "info", text: "Adequacy statement not on record. Check the pack says complete and balanced and for which life stage." });
   }
 
   return { key: "adequacy", label: "Complete & balanced", earned, max, notes };
@@ -274,7 +274,7 @@ function scoreNutrients(
   if (species === "CAT") {
     carbs = 2 * (1 - ramp(dm.carbsPct, 25, 45));
     notes.push(`Estimated carbohydrate ${dm.carbsPct.toFixed(0)}% of dry matter. Cats are obligate carnivores.`);
-    if (dm.carbsPct > 40) flags.push({ level: "caution", text: "High estimated carbohydrate for a cat food." });
+    if (dm.carbsPct > 40) flags.push({ level: "caution", text: "High estimated carbohydrate for a cat food. The estimate uses label minimums, so the true figure is likely somewhat lower." });
   }
 
   // Cats: taurine is essential. No points, but below-minimum is flagged.
@@ -318,6 +318,7 @@ function scoreIngredients(food: FoodProduct, species: Species, flags: RatingFlag
     notes.push("Contains an animal ingredient with no named species.");
     flags.push({ level: "info", text: "Uses unnamed animal ingredients, so the source can change between batches." });
   }
+  // Fruit, vegetable and turmeric colourings are not counted.
   if (ARTIFICIAL_COLOR.test(all)) {
     fraction -= 0.15;
     notes.push("Contains added colourings, which serve the buyer rather than the pet.");
@@ -336,10 +337,18 @@ function scoreIngredients(food: FoodProduct, species: Species, flags: RatingFlag
     fraction -= 0.5;
     flags.push({ level: "warning", text: "Contains propylene glycol, which is not permitted in cat food." });
   }
-  if (ALLIUM.test(all)) {
-    fraction -= 0.2;
-    notes.push("Contains onion or garlic.");
-    flags.push({ level: "caution", text: "Contains onion or garlic, which can damage red blood cells in dogs and cats." });
+  const alliumAt = list.findIndex((i) => ALLIUM.test(i));
+  if (alliumAt >= 0) {
+    // Ingredients are listed by weight. After salt means a trace, typically a flavouring.
+    const saltAt = list.findIndex((i) => /\bsalt\b/i.test(i));
+    const trace = saltAt >= 0 && alliumAt > saltAt;
+    if (trace) {
+      notes.push("Lists garlic or onion after salt, which means a trace amount used as flavouring. Not penalised.");
+    } else {
+      fraction -= 0.2;
+      notes.push("Contains onion or garlic above trace level.");
+      flags.push({ level: "caution", text: "Contains onion or garlic, which in quantity can damage red blood cells in dogs and cats." });
+    }
   }
   if (species === "DOG" && food.category === "COMPLETE") {
     const pulses = top5.filter((i) => PULSE_OR_POTATO.test(i)).length;
@@ -417,7 +426,7 @@ function scoreTreatCalories(food: FoodProduct, kcalPerKg: number): RatingCompone
   const notes: string[] = [];
   let earned: number;
   if (food.kcalPerTreat != null) {
-    earned = max * (1 - ramp(food.kcalPerTreat, 5, 60));
+    earned = max * (1 - ramp(food.kcalPerTreat, 5, 150));
     notes.push(`${food.kcalPerTreat} kcal per treat.`);
   } else {
     earned = max * (1 - ramp(kcalPerKg, 3000, 5000)) * 0.8;

@@ -107,6 +107,35 @@ export default function Landing() {
         </View>
       </View>
 
+      <Text accessibilityRole="header" style={s.h2}>
+        A feeding plan that learns your pet
+      </Text>
+      <View style={[s.hero, wide && s.heroWide, { marginTop: 0 }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.lead}>
+            The amount on the bag is a guess for the average animal, and real needs vary widely around it. Portion
+            Autopilot starts from that guess, then corrects it from your pet's own weigh-ins every two weeks, in small
+            safe steps, until the portion is right for the animal in front of you.
+          </Text>
+          <Text style={[s.lead, { marginTop: 12 }]}>
+            Staying lean is the best-supported thing an owner can do for a dog's lifespan. Autopilot is how you get
+            there without guessing.
+          </Text>
+        </View>
+        <View style={{ flex: 1, gap: 10, marginTop: wide ? 0 : 20 }}>
+          {[
+            ["1", "Feed the measured portion, in grams, of the food you chose"],
+            ["2", "Weigh in every two weeks"],
+            ["3", "Autopilot proposes 10% up or down, or holds. You decide"],
+          ].map(([n, t]) => (
+            <Card key={n} style={s.gradeRow}>
+              <Text style={s.stepNum}>{n}</Text>
+              <Text style={s.cardBody}>{t}</Text>
+            </Card>
+          ))}
+        </View>
+      </View>
+
       <Card style={{ marginTop: 40, alignItems: "center", padding: 32 }}>
         <Text style={[s.h2, { marginTop: 0, textAlign: "center" }]}>Two minutes to a first Score</Text>
         <Text style={[s.lead, { textAlign: "center", maxWidth: 520 }]}>
@@ -148,6 +177,7 @@ const s = StyleSheet.create({
   weight: { fontSize: 28, fontWeight: "800", color: c.success },
   cardTitle: { fontSize: 16, fontWeight: "700", color: c.textPrimary, marginTop: 4 },
   cardBody: { flex: 1, fontSize: 14, lineHeight: 21, color: c.textSecondary, marginTop: 4 },
+  stepNum: { fontSize: 22, fontWeight: "800", color: c.info, width: 28, textAlign: "center" },
   gradeRow: { flexDirection: "row", alignItems: "center", gap: 14, padding: 14 },
   footer: { fontSize: 13, lineHeight: 20, color: c.textTertiary, marginTop: 40, textAlign: "center" },
 });

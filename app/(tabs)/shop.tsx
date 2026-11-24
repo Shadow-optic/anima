@@ -1,6 +1,6 @@
 /**
  * Shop: every food graded, ranked by how well it fits the active pet.
- * Buying is not open yet; this is the rated catalog it will sell from.
+ * Buying is not open yet; this is the rated catalog of real products it will sell from.
  */
 
 import { useMemo, useState } from "react";
@@ -45,8 +45,8 @@ export default function Shop() {
         right={<Button small title="Rate a label" variant="secondary" onPress={() => router.push("/food/new")} />}
       />
       <Notice level="info">
-        Ordering is not open yet. Products marked “Sample product” are illustrative recipes, not real brands; they show how
-        grading works until the real catalog is loaded.
+        Ordering is not open yet. Grades come from each product's label, read from the maker's site on the date shown on
+        its page. Recipes change, so check the figures against your own bag. Can't find yours? Rate its label.
       </Notice>
       <Segmented
         value={filter}

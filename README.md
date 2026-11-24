@@ -11,8 +11,8 @@ A website that gives a dog or cat a **Longevity Score** built on published veter
 | Landing page (`/`) | Explains the Score and food ratings; no account needed to start. |
 | Onboarding (`/onboarding`) | Five steps to a first Score, computed in the browser. |
 | Score (`/(tabs)`) | The Score, the biggest opportunity to raise it, every factor with its calculation and sources, and a daily trend. |
-| Nutrition | Calorie target, meal and treat logging, weekly diet summary. |
-| Shop | Every food graded A–E and ranked by fit for the pet. Ordering is not open yet. |
+| Nutrition | **Portion Autopilot** (a feeding plan that corrects itself from weigh-ins), meal and treat logging, weekly diet summary. |
+| Shop | 44 real products graded A–E and ranked by fit for the pet, each linked to the source of its label data. Ordering is not open yet. |
 | Food detail (`/food/[id]`) | Full rating breakdown, fit for the pet, daily portion and cost. |
 | Rate a label (`/food/new`) | Type in any food's guaranteed analysis and ingredients and get a grade. |
 | Care | Vet check-ups, dental, vaccines, parasite prevention, body condition, activity. |
@@ -36,7 +36,7 @@ With no configuration the site runs in **guest mode**: everything is saved in th
 Supabase is the only backend.
 
 1. Create a Supabase project.
-2. Run `supabase/migrations/0001_init.sql` in the SQL editor (or `supabase db push`).
+2. Run the files in `supabase/migrations/` in order in the SQL editor (or `supabase db push`).
 3. Copy `.env.example` to `.env` and fill in the project URL and anon key.
 4. In Supabase → Authentication → URL configuration, set the site URL to where the site is hosted.
 
@@ -53,7 +53,9 @@ hooks/useData   All reads and writes. Screens never touch storage directly.
 lib/repo/       Persistence: LocalRepo (browser) and SupabaseRepo (account), one interface.
 shared/         Dependency-free engines, used by the app and the tests:
   food/rating     ANIMA Food Score (0–100, grade A–E) from label data
-  food/catalog    Sample catalog (illustrative products, clearly labelled)
+  food/real       Real catalog: label data with source links, maker facts, recalls found
+  food/catalog    Sample products, used only by the tests
+  nutrition/autopilot Portion Autopilot engine
   score/longevity Longevity Score engine (anima-v2.0)
   score/evidence  Every citation and the stated limits of each factor
   nutrition/energy Calorie targets and dry-matter maths
@@ -80,6 +82,17 @@ The build is a static single-page site. Any static host works as long as unknown
 - **Vercel / Netlify / Cloudflare Pages:** `vercel.json` and `public/_redirects` are included. Set the three `EXPO_PUBLIC_*` variables in the host's build settings.
 - **Docker:** `docker build --build-arg EXPO_PUBLIC_SUPABASE_URL=… --build-arg EXPO_PUBLIC_SUPABASE_ANON_KEY=… -t anima .` serves the site with nginx on port 8080.
 
-## Before selling food
+## Portion Autopilot
 
-The catalog in `shared/food/catalog.ts` is sample data. Selling needs real label data for real products, a recall feed, the makers' answers to the WSAVA questions, and checkout. See `docs/STATUS.md`.
+Feeding guides come from an equation for the average animal, and individual needs vary widely around it. Autopilot treats the equation as a first guess: feed a measured portion, weigh every two weeks, and it proposes 10% less, 10% more or no change against the safe rate from the AAHA weight-management guidelines. Each applied step becomes the pet's personal calorie factor. It checks logged intake before blaming the plan, never plans below a floor, does not restrict growing animals, and refers unexplained weight change to a vet. Engine: `shared/nutrition/autopilot.ts`.
+
+## The real catalog
+
+`shared/food/real/` holds 44 products from 28 brands. Each was transcribed from the maker's product page or label PDF (a retailer listing where the maker shows no label), and carries its source URL and the date it was read. Where a maker does not publish a value, the product's `note` says what was assumed, and the app shows that note.
+
+Keeping it honest:
+- Recipes change. The data is a snapshot from 24 Nov 2026 and needs a refresh process before it is relied on commercially.
+- Maker facts count only when the company states them. Recalls count only when found on FDA listings; "none found" is scored as unknown.
+- Publishing grades for named brands carries legal exposure if a figure is wrong. Have the catalog reviewed before a public launch.
+
+Selling still needs checkout, prices, inventory and a recall feed. See `docs/STATUS.md`.

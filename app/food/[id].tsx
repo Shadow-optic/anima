@@ -9,6 +9,7 @@ import { Badge, Button, Card, EmptyState, LinkText, Notice, PageHeader, Screen, 
 import { RatingBreakdown, foodTitle } from "@/components/food";
 import { useActivePet, useFoodRating, useFoods, usePetScore, useUpdatePet } from "@/hooks/useData";
 import { dailyCostUsd, dailyPortionGrams } from "@/shared/food/rating";
+import { BRAND_FACTS } from "@/shared/food/real";
 import { FOOD_DISCLAIMER } from "@/shared/score/evidence";
 
 const c = theme.colors;
@@ -47,6 +48,7 @@ export default function FoodDetail() {
     );
   }
 
+  const facts = food.source ? BRAND_FACTS[food.brand] : undefined;
   const isCurrent = pet?.primaryFoodId === food.id;
   const suitable = rating.fit ? rating.fit.suitable : true;
   const canBeMain = food.category === "COMPLETE";
@@ -59,7 +61,7 @@ export default function FoodDetail() {
       <LinkText onPress={back} style={{ marginBottom: 16 }}>
         ← Back
       </LinkText>
-      <PageHeader title={foodTitle(food)} subtitle={food.isSample ? undefined : food.brand} />
+      <PageHeader title={foodTitle(food)} subtitle={facts ? `Made by ${facts.company}` : undefined} />
       <View style={s.badges}>
         {food.isSample ? <Badge text="Sample product, not a real brand" /> : null}
         {food.ownerId ? <Badge text="Entered from a label by you" color={c.info} /> : null}
@@ -67,6 +69,14 @@ export default function FoodDetail() {
           <Badge key={t} text={t} />
         ))}
       </View>
+
+      {food.source ? (
+        <Notice level="info">
+          Label data read from the {food.source.type === "manufacturer" ? "maker's site" : "a retailer's listing"} on{" "}
+          {food.source.retrievedAt}. Recipes change, so check it against your pack.{food.note ? ` ${food.note}` : ""}{" "}
+          <LinkText href={food.source.url}>Source</LinkText>
+        </Notice>
+      ) : null}
 
       <RatingBreakdown rating={rating} petName={pet?.name} />
 
@@ -106,7 +116,7 @@ export default function FoodDetail() {
 
       <SectionTitle>From the label</SectionTitle>
       <Card>
-        <Row k="Adequacy statement" v={ADEQUACY[food.adequacyBasis]} />
+        <Row k="Adequacy statement" v={food.aafcoStatement ?? ADEQUACY[food.adequacyBasis]} />
         <Row k="Life stage" v={STAGE[food.adequacyLifeStage]} />
         <Row
           k="Guaranteed analysis"
@@ -117,6 +127,31 @@ export default function FoodDetail() {
         ) : null}
         <Row k="Ingredients" v={food.ingredients.length ? food.ingredients.join(", ") : "Not on record"} />
       </Card>
+
+      {facts ? (
+        <>
+          <SectionTitle>Maker and recall record</SectionTitle>
+          <Card>
+            <Row k="Company" v={facts.company} />
+            <Row
+              k="Recalls found, last five years"
+              v={
+                facts.recalls?.length
+                  ? facts.recalls.map((r) => `${r.date}: ${r.product}. ${r.reason}.`).join("\n")
+                  : "None found on the FDA's public listings. Those listings are incomplete for part of the period, so this is scored as unknown, not as a clean record."
+              }
+            />
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 16, marginTop: 12 }}>
+              <LinkText href={facts.makerSource}>Maker information source</LinkText>
+              {facts.recalls?.map((r) => (
+                <LinkText key={r.url} href={r.url}>
+                  FDA notice {r.date}
+                </LinkText>
+              ))}
+            </View>
+          </Card>
+        </>
+      ) : null}
 
       <Text style={s.disclaimer}>
         {FOOD_DISCLAIMER} <LinkText onPress={() => router.push("/science")} style={{ fontSize: 12 }}>How foods are scored</LinkText>

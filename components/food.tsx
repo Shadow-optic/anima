@@ -21,7 +21,7 @@ const FORMAT_LABEL: Record<string, string> = {
 };
 
 export function foodTitle(food: FoodProduct): string {
-  return food.isSample ? food.name : `${food.brand} ${food.name}`.trim();
+  return food.isSample || !food.brand ? food.name : `${food.brand} ${food.name}`.trim();
 }
 
 export function FoodRow({

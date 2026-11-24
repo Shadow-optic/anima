@@ -1,5 +1,6 @@
 /**
- * Sample catalog.
+ * Sample catalog. Used only by the tests now: the app shows the real catalog
+ * in `./real`.
  *
  * These are ILLUSTRATIVE products, not real ones. Each is a typical recipe of
  * its kind with realistic label values, so the rating engine, the shop and the

@@ -27,11 +27,28 @@ export interface Pet {
   activityMinutesPerDay: number | null;
   /** The food this pet eats most days. References a catalog or custom food id. */
   primaryFoodId: string | null;
+  /**
+   * Portion Autopilot: this pet's personal multiplier on the textbook calorie
+   * estimate, learned from weigh-ins. 1 = the formula as is.
+   */
+  calorieFactor: number;
+  /** When the feeding plan was last reviewed and a factor applied. */
+  planReviewedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export type NewPet = Omit<Pet, "id" | "userId" | "createdAt" | "updatedAt">;
+
+export interface WeighIn {
+  id: string;
+  petId: string;
+  date: string; // YYYY-MM-DD
+  weightKg: number;
+  createdAt: string;
+}
+
+export type NewWeighIn = Omit<WeighIn, "id" | "createdAt">;
 
 // ─────────────────────────────────────────────
 // Food
@@ -91,6 +108,12 @@ export interface FoodProduct {
   /** For treats: kcal in one piece. */
   kcalPerTreat?: number;
   tags?: string[];
+  /** The adequacy statement as printed, when on record. */
+  aafcoStatement?: string;
+  /** Where the label data came from, for real products. */
+  source?: { url: string; type: "manufacturer" | "retailer"; retrievedAt: string };
+  /** Anything a reader should know about how a value was obtained. */
+  note?: string;
   /** Illustrative catalog entry, not a real product. */
   isSample?: boolean;
   /** Entered by a user from a label. */
